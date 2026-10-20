@@ -10,7 +10,7 @@ SECTIONS = ["## 1. Executive summary", "## 2. Security, event date and data time
             "## 6. Benchmark and peer comparison", "## 7. Relevant public news and announcements",
             "## 8. Competing hypotheses", "## 9. Evidence for and against each hypothesis",
             "## 10. Confidence assessment", "## 11. Potential risk implications", "## 12. What remains unknown",
-            "## 13. Recommended follow-up checks", "## 14. Investigation timeline and tool calls"]
+            "## 13. Recommended next action", "## 14. Investigation timeline and tool calls"]
 
 
 def test_full_report_has_all_fourteen_sections(demo_ds, demo_monitor, settings):

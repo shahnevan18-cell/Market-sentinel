@@ -92,9 +92,9 @@ Timing on the day: the presentation is on Wednesday 21 October, an NSE trading d
 
 | Time | Page | Do | Say |
 |---|---|---|---|
-| 0:00 | Market overview | Point to the source pill, the NIFTY 50 strip and the Sentinel grid | "Twenty-five NIFTY 50 stocks, rupee prices, NSE sessions in IST. Each cell is one stock on one day, coloured by how unusual its return was for that stock. Amber squares are alerts." |
-| 0:40 | Anomaly monitor | Filter Severity to Critical and High, select the alert. Read the "Why it triggered" lines and the score breakdown | "Three tests: the raw move, the part the NIFTY 50 does not explain, and volume. The score ranks attention; it is not a probability." |
-| 1:20 | Investigation workspace | The alert is preselected. Turn on Presentation pacing, press Run investigation | "Each line on the right is a step that actually ran: the NIFTY 50 comparison, the sector index and peers, the Indian news search." |
+| 0:00 | Market overview | Point to the source pill, the NIFTY 50 strip and the Sentinel grid, then the legend | "Twenty-five NIFTY 50 stocks, rupee prices, NSE sessions in IST. Each coloured cell is an alert, coloured by its priority band, slate to red, with the direction and the score on it. Quiet days stay neutral, and a cross means no data. Priority means urgency of review, not a good or bad stock." |
+| 0:40 | Anomaly monitor | Filter Severity to Critical and High, pick the alert in Selected alert. Read the panel's plain-English reason, then the score breakdown | "Three tests: the raw move, the part the NIFTY 50 does not explain, and volume. The score ranks attention; it is not a probability." |
+| 1:20 | Investigation workspace | The alert is preselected. Turn on Presentation pacing, press Run investigation. When it ends, read the Summary tab top to bottom: what happened, the explanation and its status, the one next action | "Each line on the right is a step that actually ran. The summary separates three things: what we observed, how strong the explanation is (verified, provisional or unresolved) and the single next check an analyst should make." |
 | 2:20 | Same page, Evidence tab | Show the comparison bars, the news table (published time in IST, timing, relevance, links) and the official disclosures list | "Only items between the previous 15:30 close and the event-day close can explain the move. NSE's terms forbid automated scraping, so exchange announcements are linked for a manual check, never scraped." |
 | 2:50 | Hypotheses, then Audit trail | Open the leading hypothesis to show its criteria and points. In Audit trail, show Model decisions (or say the rule-based protocol ran) and inspect one tool call | "This is the exact input and output of that call, as the agent saw it." |
 | 3:30 | Historical replay (demo data) | Switch the sidebar to Demonstration data. In "Designed demonstration scenarios", pick 30 Sep 2026: bank falls after results, press Investigate as of that day | "A fictional bank declared results at 18:05 IST on 29 September; the stock fell 9% the next session. The report keeps the publication time and the board-meeting date apart." |
@@ -118,7 +118,7 @@ The evening before, on the presentation laptop, in PowerShell:
 
 ```powershell
 cd "C:\Users\Navin shah\Documents\market_sentinel"
-.\.venv\Scripts\python.exe -m pytest -q                  # expect 187 passed
+.\.venv\Scripts\python.exe -m pytest -q                  # expect 227 passed
 .\.venv\Scripts\python.exe scripts\validate_symbols.py   # expect 30 symbols, no FAIL
 .\.venv\Scripts\python.exe scripts\smoke_test.py --no-llm
 ```
@@ -196,6 +196,20 @@ with its reason.
 What does the priority score mean?
 A ranking for analyst attention on a 0 to 100 scale from four capped components with fixed weights. It is not a
 probability that anything caused the move.
+
+Why does the app not say the earnings caused the move, when the headline says so?
+The headline is the publisher's claim. The app read the headline, publisher, time and link, not the article or the
+company's filing, so it labels the item "Potential catalyst - not yet verified" and the explanation provisional, and
+its next action is to check the results filing and its time. Only a retrieved company announcement counts as
+verified. When several publishers report the same subject, the app says so; that corroborates the report but is still
+not an official record.
+
+What does the app do when it cannot decide?
+It says the cause is unresolved and still gives one next action. For HCL Technologies on 13 October, sector movement
+(75) and company news (70) were almost tied: the whole IT group rose, HCL rose further, and results headlines were in
+the window. The app names both explanations, explains that a daily close cannot separate a company reaction from a
+larger reaction to sector news, and recommends checking HCL's own results filing on NSE and the peers' shared driver,
+saying how each finding would move the assessment.
 
 How accurate is it?
 On live NSE data there is no ground truth for "this move deserved an alert", so no accuracy is claimed; the replay

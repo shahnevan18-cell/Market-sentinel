@@ -154,6 +154,17 @@ def render() -> None:
                     "link-only, so live evidence comes from independent publishers; the demo's fictional announcements "
                     "show the announcement path. Publication time is kept apart from the date of the event a source "
                     "reports. News is evidence that may explain a move, never proof that it did.")
+        st.markdown("##### Evidence levels and the next action\n\n"
+                    "Each investigation labels its catalyst evidence. **A, verified company event**: a retrieved "
+                    "company announcement inside the window (only the demo's fictional announcements, because live "
+                    "NSE/BSE pages are link-only). **B, potential catalyst, not yet verified**: a headline names the "
+                    "company and a cause inside the window; the app shows the exact headline, publisher, times and "
+                    "link, and says the article and the filing were not read. The candidate is the subject most "
+                    "independent publishers report; social posts, tips and forecast pages are ignored. **C, no "
+                    "identified catalyst**. The Summary then gives one next action chosen by fixed rules: unreliable "
+                    "data first, then a failed news search, then an unresolved tie, then the leading explanation's "
+                    "weakest link. It states why, the steps, what would change the assessment and when to hold back, "
+                    "and it is never buy or sell advice.")
 
     with tabs[3]:
         st.graphviz_chart(ARCH_DOT, width="stretch")

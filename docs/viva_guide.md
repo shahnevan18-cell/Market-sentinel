@@ -284,6 +284,31 @@ Is volatility a forecast?
 No. Every volatility figure in the app is historical (realised) volatility over a stated window, annualised with the
 square root of 252.
 
+What are the evidence levels A, B and C?
+A is a verified company event: a retrieved announcement inside the information window (only the synthetic demo
+announcements in this version, because live NSE and BSE pages are link-only). B is a potential catalyst: a headline
+names the company and a cause inside the window, but its article and the official filing were not read, so it is
+labelled "not yet verified" and the explanation is provisional. C means no catalyst was identified, either because
+nothing direct and timely was found or because the news search failed; the two are reported differently.
+
+How is the recommended next action chosen?
+By fixed rules from what the record leaves open, in order: unreliable data first, then a failed news search, then an
+unresolved tie between explanations, then the leading explanation's weakest link (for example verifying a headline
+against the filing). It comes with the reason, up to three steps, what would change the assessment and when to hold
+back a stronger conclusion. Its figures are copied from the record, and it never advises buying or selling.
+
+What is the difference between alert priority and anomaly intensity on the grid?
+Anomaly intensity is the robust z-score of the day's return: how unusual the move was. Alert priority is the 0 to 100
+score that also weighs the market-adjusted move, volume and the volatility regime, banded at 30, 50 and 70. The grid
+shows priority by default and intensity as a second view, so the two are never mixed.
+
+What did testing on real data change in the guidance?
+Running it on the laptop's saved HCL and ITC investigations showed three faults that synthetic fixtures had missed: a
+routine zero-volume note was blocking the real next action, the earliest "direct" headline for ITC was about another
+firm's tax "ITC demand", and social posts and price-forecast pages counted as evidence. The rules now treat routine
+notes as limitations, choose the subject most publishers report (for ITC, Citi's rating upgrade), ignore social posts
+as publishers and screen out tips and forecast pages. Each fix has a regression test with fictional names.
+
 What would you add with more time?
 Intraday data to time moves against announcements, larger peer groups from an official classification, reading the
 text of filings, an authorised or licensed feed of NSE and BSE announcements, a labelled evaluation set reviewed by people, and scheduled monitoring with alerts.

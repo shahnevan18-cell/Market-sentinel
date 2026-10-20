@@ -6,9 +6,100 @@ import math
 import pandas as pd
 import streamlit as st
 
+from analytics.alert_view import alert_label
 from ui import components as c
 from ui.nav import open_investigation
 from ui.state import app_data
+
+
+WINDOWS = {"1 week": 5, "1 month": 21, "3 months": 63, "Custom": None}
+GRID_KEYS = ("grid_window", "grid_metric", "grid_order", "grid_custom")
+
+
+def _reset_grid() -> None:
+    st.session_state["grid_window"] = "1 month"
+    st.session_state["grid_metric"] = "Alert priority"
+    st.session_state["grid_order"] = "Highest priority first"
+    st.session_state.pop("grid_custom", None)
+    st.session_state.pop("grid_chart", None)
+
+
+def _sentinel_grid_section(scan) -> None:
+    cfg = scan.config
+    c.section("Sentinel grid",
+              "Each row is a watchlist stock and each column an NSE session. Choose what the colour shows, the period "
+              "and the row order below.")
+    cal_all = scan.panel.calendar
+    st.session_state.setdefault("grid_window", "1 month")
+    k1, k2, k3, k4 = st.columns([2.9, 2.1, 2.2, 0.9], vertical_alignment="bottom")
+    with k1:
+        window = st.segmented_control("Period", list(WINDOWS), key="grid_window", width="stretch") or "1 month"
+    with k2:
+        metric = st.radio("Colour shows", ["Alert priority", "Anomaly intensity"], key="grid_metric", horizontal=True,
+                          help="Alert priority: how urgently an alert should be reviewed (the priority score's "
+                               "band). Anomaly intensity: how unusual the day's return was (robust z), alert or not.")
+    with k3:
+        order = st.radio("Row order", ["Highest priority first", "Peer group"], key="grid_order", horizontal=True)
+    with k4:
+        st.button("Reset view", on_click=_reset_grid, help="One month, alert priority, highest priority first.",
+                  width="stretch")
+    if window == "Custom":
+        options = [d.strftime("%d %b %Y") for d in cal_all]
+        default = (options[max(len(options) - 42, 0)], options[-1])
+        if st.session_state.get("grid_custom") and not all(v in options for v in st.session_state["grid_custom"]):
+            st.session_state.pop("grid_custom")
+        lo, hi = st.select_slider("Sessions shown", options=options, value=default, key="grid_custom")
+        i0, i1 = options.index(lo), options.index(hi)
+        cal = cal_all[i0:i1 + 1]
+        if len(cal) > 130:
+            st.caption(f"Showing the last 130 of the {len(cal)} sessions selected, to keep cells readable.")
+            cal = cal[-130:]
+    else:
+        cal = cal_all[-WINDOWS[window]:]
+    fig, alerts = c.sentinel_grid(scan, cal, metric="priority" if metric == "Alert priority" else "intensity",
+                                  order="priority" if order.startswith("Highest") else "group")
+    if metric == "Alert priority":
+        b = c.priority_bands(cfg)
+        st.html(
+            '<div class="ms-note">'
+            f'<b>Low</b> (under {b[1][1]:.0f}): lower review urgency. '
+            f'<b>Moderate</b> ({b[1][1]:.0f} to under {b[2][1]:.0f}): worth monitoring. '
+            f'<b>High</b> ({b[2][1]:.0f} to under {b[3][1]:.0f}): needs closer investigation. '
+            f'<b>Critical</b> ({b[3][1]:.0f} and above): prioritise analyst review. '
+            "These are the same thresholds that label every alert. Neutral cells had no alert; a cross means no data "
+            "for that session. Arrows give the direction of the move and the number is the priority score. "
+            "High priority means the move deserves attention; it says nothing about whether the stock is a good or "
+            "bad investment.</div>")
+    else:
+        st.html('<div class="ms-note">Colour is the robust z-score of the daily return against the stock\'s previous '
+                '60 sessions: teal for an unusually strong rise, red for an unusually strong fall. This is how unusual '
+                'the move was, not how urgent it is; outlined cells are alerts. A cross means no data.</div>')
+    st.caption("Zoom with the + and - buttons at the top right of the chart, or drag across an area; the house button "
+               "resets the zoom. Click an outlined alert cell to inspect it below.")
+    sel = st.plotly_chart(fig, width="stretch", config=c.GRID_PLOT_CONFIG, key="grid_chart", on_select="rerun",
+                          selection_mode="points")
+    picked = None
+    pts = (sel.selection.points if sel and hasattr(sel, "selection") else []) or []
+    for pt in pts:
+        cd = pt.get("customdata") if isinstance(pt, dict) else None
+        if cd and isinstance(cd, (list, tuple)) and str(cd[0]) in set(alerts["event_id"]):
+            picked = str(cd[0])
+    if alerts.empty:
+        st.caption("No alerts in this period.")
+        return
+    ordered = alerts.sort_values(["priority_score", "date"], ascending=[False, False])
+    ids = list(ordered["event_id"])
+    if picked:
+        st.session_state["grid_pick"] = picked
+    if st.session_state.get("grid_pick") not in ids:
+        st.session_state["grid_pick"] = ids[0]
+    labels = {r["event_id"]: alert_label(r) for _, r in ordered.iterrows()}
+    pick = st.selectbox("Alert in this period", ids, key="grid_pick", format_func=lambda e: labels.get(e, e),
+                        help="Sorted by priority. Clicking an alert cell in the grid selects it here.")
+    ev = ordered[ordered["event_id"] == pick].iloc[0].to_dict()
+    c.alert_detail_panel(ev, scan.universe.short_label(scan.universe.benchmark), cfg.lookback)
+    if st.button("Investigate this alert", type="primary", key="grid_investigate"):
+        open_investigation(ev["event_id"], historical=False)
 
 
 def render() -> None:
@@ -48,10 +139,7 @@ def render() -> None:
          "sub": f"{int((recent['severity'] == 'Critical').sum()) if len(recent) else 0} critical"},
     ])
 
-    c.section("Sentinel grid",
-              "Robust z-score of every stock's daily return over the last 30 NSE sessions, grouped by peer group. "
-              "Teal is an unusually strong rise, red an unusually strong fall. Squares mark alerts.")
-    st.plotly_chart(c.sentinel_grid(scan, 30), width="stretch", config=c.PLOT_CONFIG)
+    _sentinel_grid_section(scan)
 
     left, right = st.columns([1, 1], gap="large")
     with left:
@@ -122,8 +210,9 @@ def render() -> None:
         options = list(top["event_id"])
         col1, col2 = st.columns([3, 1], vertical_alignment="bottom")
         with col1:
+            labels = {r["event_id"]: alert_label(r) for _, r in top.iterrows()}
             chosen = st.selectbox("Alert to investigate", options, key="overview_pick",
-                                  format_func=lambda e: e.replace(":", ", "))
+                                  format_func=lambda e: labels.get(e, e))
         with col2:
             if st.button("Open in workspace", type="primary", width="stretch"):
                 open_investigation(chosen, historical=False)

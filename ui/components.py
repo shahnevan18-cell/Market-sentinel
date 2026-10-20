@@ -14,7 +14,7 @@ from plotly.subplots import make_subplots
 from config.market import (BAR_FINAL_AFTER, CURRENCY_SYMBOL, MARKET_TZ, TZ_LABEL, fmt_inr, fmt_inr_short,  # noqa: F401
                            fmt_market_clock, fmt_market_time, group_indian, holiday_name)
 from providers.market_data import MarketDataset, parse_iso
-from ui.theme import AMBER, CYAN, MUTED, PANEL_2, RED, RULE, SEVERITY_COLORS, SLATE, TEAL, TEXT
+from ui.theme import AMBER, CYAN, INK, MUTED, NO_ALERT, PANEL_2, RED, RULE, SEVERITY_COLORS, SLATE, TEAL, TEXT
 
 PLOT_CONFIG = {"displaylogo": False, "displayModeBar": False}
 
@@ -201,60 +201,173 @@ def no_data_screen(ds: MarketDataset) -> None:
     )
 
 
+def empty_state(title: str, body: str) -> None:
+    st.html(f'<div class="ms-empty"><div class="h">{esc(title)}</div><div class="b">{esc(body)}</div></div>')
+
+
+def alert_detail_panel(ev: dict, benchmark_name: str, lookback: int = 60) -> None:
+    """Full-width description of one selected alert: who, when, what, how strong and why it was raised."""
+    from analytics.alert_view import plain_reason
+    vol = ev.get("volume_ratio")
+    vol_txt = "n/a" if is_missing(vol) else f"{vol:.1f}x its 60-session median"
+    if not is_missing(ev.get("volume")) and not is_missing(vol):
+        vol_txt += f" ({group_indian(ev['volume'])} shares)"
+    cells = [
+        ("Event date", f"{pd.Timestamp(ev['date']):%A %d %B %Y}"),
+        ("Alert type", ev.get("event_type") or "n/a"),
+        ("Priority", f"{ev['priority_score']:.0f} of 100, {str(ev.get('severity', '')).lower()} band"),
+        ("Daily return", fmt_pct(ev.get("ret"))),
+        (f"{benchmark_name} same day", fmt_pct(ev.get("mkt_ret"))),
+        ("Volume", vol_txt),
+    ]
+    grid = "".join(f'<div><div class="l">{esc(k)}</div><div class="v">{esc(v)}</div></div>' for k, v in cells)
+    st.html(
+        f'<div class="ms-alert" role="region" aria-label="Selected alert">'
+        f'<div class="title">{esc(ev["name"])} ({esc(short_symbol(ev["ticker"]))})</div>'
+        f'<div class="meta">{severity_html(ev.get("severity", ""))} &nbsp; Peer group: {esc(ev.get("sector") or "n/a")}'
+        f' &middot; Symbol {esc(ev["ticker"])}</div>'
+        f'<div class="grid">{grid}</div>'
+        f'<div class="why">{esc(plain_reason(ev, benchmark_name, lookback))}</div></div>')
+
+
 # ---------------------------------------------------------------------------
 # Charts
 # ---------------------------------------------------------------------------
 
-def sentinel_grid(scan, sessions: int = 30) -> go.Figure:
-    cal = scan.panel.calendar[-sessions:]
+GRID_PLOT_CONFIG = {"displaylogo": False, "displayModeBar": True, "scrollZoom": False,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d", "toggleSpikelines",
+                                               "hoverClosestCartesian", "hoverCompareCartesian"],
+                    "toImageButtonOptions": {"filename": "sentinel_grid", "scale": 2}}
+
+
+def priority_bands(cfg) -> list[tuple[str, float, float]]:
+    """(band, lower, upper) from the configured severity thresholds, the same ones that label every alert."""
+    return [("Low", 0.0, cfg.severity_moderate), ("Moderate", cfg.severity_moderate, cfg.severity_high),
+            ("High", cfg.severity_high, cfg.severity_critical), ("Critical", cfg.severity_critical, 100.0)]
+
+
+def _grid_rows(scan, cal, order: str) -> list[tuple[str, str, str]]:
     universe = scan.universe
-    tickers, sectors, names = [], [], []
+    rows = []
     for sector in universe.sectors:
         for sec in universe.securities:
             if sec.sector == sector and sec.ticker in scan.features:
-                tickers.append(sec.ticker)
-                sectors.append(sector)
-                names.append(sec.name)
-    if not tickers or len(cal) == 0:
-        return go.Figure()
-    z = np.array([[scan.features[t].loc[d, "z_ret"] if d in scan.features[t].index else np.nan for d in cal] for t in tickers])
-    r = np.array([[scan.features[t].loc[d, "ret"] if d in scan.features[t].index else np.nan for d in cal] for t in tickers])
-    custom = np.dstack([r, np.array([[n] * len(cal) for n in names], dtype=object),
-                        np.array([[s] * len(cal) for s in sectors], dtype=object)])
+                rows.append((sec.ticker, sec.name, sector))
+    if order == "priority":
+        ev = scan.events
+        top = {}
+        if not ev.empty:
+            win = ev[ev["date"].isin(cal)]
+            top = win.groupby("ticker")["priority_score"].max().to_dict()
+        rows.sort(key=lambda r: (-top.get(r[0], -1.0), short_symbol(r[0])))
+    return rows
+
+
+def sentinel_grid(scan, cal, metric: str = "priority", order: str = "priority") -> tuple[go.Figure, pd.DataFrame]:
+    """Stock-by-session grid for the sessions in `cal`.
+
+    metric "priority": colour shows the alert-priority band of each alert (the configured thresholds); sessions
+    without an alert are a neutral colour, and sessions with no data are marked with a cross, never coloured as zero.
+    metric "intensity": colour shows the robust z-score of the daily return (how unusual the move was).
+    Alert cells always carry a direction arrow and, when space allows, their priority score as text.
+    Returns the figure and the alerts shown in it.
+    """
+    cfg = scan.config
+    rows = _grid_rows(scan, cal, order)
+    empty = scan.events.iloc[0:0]
+    if not rows or len(cal) == 0:
+        return go.Figure(), empty
+    tickers = [r[0] for r in rows]
     labels = [short_symbol(t) for t in tickers]
-    x = [d.strftime("%d %b") for d in cal]
-    fig = go.Figure(go.Heatmap(
-        z=np.clip(z, -6, 6), x=x, y=labels, customdata=custom, zmin=-6, zmax=6, zmid=0, xgap=2, ygap=2,
-        colorscale=[[0.0, RED], [0.35, "#5A2B35"], [0.5, PANEL_2], [0.65, "#1E5550"], [1.0, TEAL]],
-        colorbar=dict(title=dict(text="Robust z of daily return", side="top"), orientation="h", thickness=8,
-                      len=0.35, x=0, xanchor="left", y=-0.02, yanchor="top", tickvals=[-6, -3, 0, 3, 6],
-                      tickfont=dict(size=10)),
-        hovertemplate="<b>%{y}</b> %{customdata[1]}<br>%{customdata[2]}<br>%{x}<br>"
-                      "Return %{customdata[0]:+.2%}<br>Robust z %{z:+.2f}<extra></extra>",
-    ))
+    x = [d.strftime("%d %b %y") for d in cal]
     ev = scan.events
-    if not ev.empty:
-        recent = ev[ev["date"].isin(cal) & ev["ticker"].isin(tickers)]
-        if len(recent):
-            fig.add_trace(go.Scatter(
-                x=[d.strftime("%d %b") for d in recent["date"]], y=[short_symbol(t) for t in recent["ticker"]],
-                mode="markers", marker=dict(symbol="square-open", size=13, color=AMBER, line=dict(width=1.6)),
-                customdata=np.stack([recent["event_type"], recent["priority_score"], recent["severity"]], axis=1),
-                hovertemplate="<b>Alert</b> %{y}, %{x}<br>%{customdata[0]}<br>Priority %{customdata[1]:.0f} "
-                              "(%{customdata[2]})<extra></extra>", showlegend=False))
-    prev = None
-    for i, s in enumerate(sectors):
-        if s != prev:
-            fig.add_annotation(x=1.0, xref="paper", xanchor="left", y=labels[i], yref="y", text=f" {s}",
-                               showarrow=False, font=dict(size=10, color=MUTED), yshift=0)
-            if i > 0:
-                fig.add_shape(type="line", xref="paper", x0=0, x1=1, yref="y", y0=i - 0.5, y1=i - 0.5,
-                              line=dict(color=RULE, width=1))
-            prev = s
-    fig.update_layout(height=max(360, 21 * len(tickers) + 120), margin=dict(l=10, r=150, t=10, b=60),
-                      yaxis=dict(autorange="reversed", showgrid=False, tickfont=dict(size=11)),
-                      xaxis=dict(showgrid=False, tickfont=dict(size=10), side="top"))
-    return fig
+    alerts = ev[ev["date"].isin(cal) & ev["ticker"].isin(tickers)] if not ev.empty else empty
+    alert_at = {(r["ticker"], r["date"]): r for _, r in alerts.iterrows()}
+
+    def cell(t, d, col):
+        f = scan.features[t]
+        return f.at[d, col] if d in f.index else np.nan
+
+    ret = np.array([[cell(t, d, "ret") for d in cal] for t in tickers], dtype=float)
+    zr = np.array([[cell(t, d, "z_ret") for d in cal] for t in tickers], dtype=float)
+    vr = np.array([[cell(t, d, "volume_ratio") for d in cal] for t in tickers], dtype=float)
+    missing = np.isnan(ret)
+    pr = np.full(ret.shape, -1.0)
+    band = np.full(ret.shape, "No alert", dtype=object)
+    kind = np.full(ret.shape, "", dtype=object)
+    for i, t in enumerate(tickers):
+        for j, d in enumerate(cal):
+            a = alert_at.get((t, d))
+            if a is not None:
+                pr[i, j], band[i, j], kind[i, j] = a["priority_score"], a["severity"], a["event_type"]
+    pr[missing] = np.nan
+    band[missing] = "No data"
+    names = np.array([[r[1]] * len(cal) for r in rows], dtype=object)
+    groups = np.array([[r[2]] * len(cal) for r in rows], dtype=object)
+    fulld = np.array([[d.strftime("%a %d %b %Y") for d in cal] for _ in tickers], dtype=object)
+    custom = np.dstack([names, groups, fulld, band, np.nan_to_num(pr, nan=-1.0), ret, zr, vr, kind])
+    hover = ("<b>%{y}</b> %{customdata[0]}<br>%{customdata[2]} · %{customdata[1]}<br>"
+             "Alert priority: %{customdata[3]}<br>Daily return %{customdata[5]:+.2%} · robust z %{customdata[6]:+.1f}"
+             "<br>Volume %{customdata[7]:.1f}x median<extra></extra>")
+    if metric == "priority":
+        bands = priority_bands(cfg)
+        lo = -1.0
+        span = 100.0 - lo
+
+        def pos(v):
+            return (v - lo) / span
+        scale = [[0.0, NO_ALERT], [pos(0) - 1e-9, NO_ALERT]]
+        for name, a, b in bands:
+            scale += [[pos(a), SEVERITY_COLORS[name]], [min(pos(b) - 1e-9, 1.0), SEVERITY_COLORS[name]]]
+        scale[-1][0] = 1.0
+        tickvals = [-0.5] + [(a + b) / 2 for _, a, b in bands]
+        ticktext = ["No alert"] + [f"{name} (under {b:.0f})" if name == "Low" else
+                                   f"Critical ({a:.0f}+)" if name == "Critical" else f"{name} ({a:.0f} to {b:.0f})"
+                                   for name, a, b in bands]
+        trace = go.Heatmap(z=pr, x=x, y=labels, customdata=custom, zmin=lo, zmax=100.0, colorscale=scale,
+                           xgap=2, ygap=2, hovertemplate=hover, hoverongaps=False,
+                           colorbar=dict(title=dict(text="Alert priority band (score 0-100)", side="top"),
+                                         orientation="h", thickness=10, len=0.9, x=0, xanchor="left", y=-0.04,
+                                         yanchor="top", tickvals=tickvals, ticktext=ticktext, tickfont=dict(size=10)))
+    else:
+        zc = np.clip(zr, -6, 6)
+        trace = go.Heatmap(z=zc, x=x, y=labels, customdata=custom, zmin=-6, zmax=6, zmid=0, xgap=2, ygap=2,
+                           colorscale=[[0.0, RED], [0.35, "#5A2B35"], [0.5, PANEL_2], [0.65, "#1E5550"], [1.0, TEAL]],
+                           hovertemplate=hover, hoverongaps=False,
+                           colorbar=dict(title=dict(text="Anomaly intensity: robust z of daily return", side="top"),
+                                         orientation="h", thickness=10, len=0.6, x=0, xanchor="left", y=-0.04,
+                                         yanchor="top", tickvals=[-6, -3, 0, 3, 6],
+                                         ticktext=["-6 rare fall", "-3", "0 typical", "+3", "+6 rare rise"],
+                                         tickfont=dict(size=10)))
+    fig = go.Figure(trace)
+    ii, jj = np.where(missing)
+    if len(ii):
+        fig.add_trace(go.Scatter(x=[x[j] for j in jj], y=[labels[i] for i in ii], mode="text", text=["×"] * len(ii),
+                                 textfont=dict(color=MUTED, size=12), hoverinfo="skip", showlegend=False))
+    if len(alerts):
+        ax = [r["date"].strftime("%d %b %y") for _, r in alerts.iterrows()]
+        ay = [short_symbol(r["ticker"]) for _, r in alerts.iterrows()]
+        arrow = ["▲" if (r["ret"] or 0) > 0 else "▼" for _, r in alerts.iterrows()]
+        text = [f"{a}{r['priority_score']:.0f}" if len(cal) <= 31 else a for a, (_, r) in zip(arrow, alerts.iterrows())]
+        dark_text = metric == "priority"      # light band colours behind the label in the priority view
+        fig.add_trace(go.Scatter(
+            x=ax, y=ay, mode="markers+text", text=[f"<b>{t}</b>" for t in text],
+            textfont=dict(size=11 if len(cal) <= 31 else 9, color=INK if dark_text else TEXT),
+            marker=dict(symbol="square", size=22 if len(cal) <= 31 else 12, color="rgba(0,0,0,0)",
+                        line=dict(width=0 if dark_text else 1.4, color=TEXT)),
+            customdata=np.stack([alerts["event_id"], alerts["name"], alerts["event_type"], alerts["priority_score"],
+                                 alerts["severity"], alerts["ret"]], axis=1),
+            hovertemplate="<b>%{y}</b> %{customdata[1]}<br>%{x}: %{customdata[2]}<br>Priority %{customdata[3]:.0f} "
+                          "(%{customdata[4]}) · return %{customdata[5]:+.2%}<br>Click to inspect<extra></extra>",
+            showlegend=False, name="alerts"))
+    n = len(cal)
+    fig.update_layout(
+        height=max(400, 26 * len(tickers) + 170), margin=dict(l=10, r=10, t=58, b=70),
+        uirevision=f"{metric}-{order}-{x[0]}-{x[-1]}", dragmode="zoom", clickmode="event+select",
+        yaxis=dict(autorange="reversed", showgrid=False, tickfont=dict(size=12), fixedrange=False),
+        xaxis=dict(showgrid=False, tickfont=dict(size=11), side="top", type="category", tickangle=0,
+                   dtick=max(1, n // 10)))
+    return fig, alerts
 
 
 def movers_chart(scan, date) -> go.Figure:

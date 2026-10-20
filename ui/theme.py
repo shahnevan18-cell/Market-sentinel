@@ -17,7 +17,10 @@ AMBER = "#E9A23B"
 RED = "#E5534B"
 SLATE = "#6C7FA0"
 
-SEVERITY_COLORS = {"Critical": RED, "High": AMBER, "Moderate": CYAN, "Low": SLATE, "Unscored": SLATE}
+SAND = "#CDBB7A"
+# An ordered ramp (cool and dim to hot and bright) so a higher band always looks more urgent.
+SEVERITY_COLORS = {"Critical": RED, "High": AMBER, "Moderate": SAND, "Low": SLATE, "Unscored": SLATE}
+NO_ALERT = "#18283F"
 RELEVANCE_COLORS = {"direct": TEAL, "indirect": CYAN, "uncertain": MUTED, "unrelated": SLATE}
 FONT = "IBM Plex Sans, Segoe UI, sans-serif"
 
@@ -102,6 +105,38 @@ a:focus-visible, button:focus-visible {{ outline: 2px solid var(--cyan); outline
 .ms-log {{ font-size:.82rem; line-height:1.45; }}
 .ms-log .ok {{ color:var(--teal); }} .ms-log .err {{ color:var(--red); }} .ms-log .warn {{ color:var(--amber); }}
 .ms-log .who {{ color:var(--muted); }}
+.ms-alert {{ border:1px solid var(--rule); border-left:3px solid var(--cyan); border-radius:6px;
+             background:var(--panel); padding:.8rem 1rem; margin:.4rem 0 .8rem 0; }}
+.ms-alert .title {{ font-size:1.12rem; font-weight:600; color:var(--text); }}
+.ms-alert .meta {{ font-size:.86rem; color:var(--muted); margin:.15rem 0 .55rem 0; }}
+.ms-alert .grid {{ display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:.5rem 1rem;
+                   margin-bottom:.55rem; }}
+.ms-alert .grid .l {{ font-size:.76rem; color:var(--muted); }}
+.ms-alert .grid .v {{ font-size:.98rem; color:var(--text); }}
+.ms-alert .why {{ font-size:.92rem; color:#C9D3E2; line-height:1.45; }}
+.ms-empty {{ border:1px dashed var(--rule); border-radius:6px; padding:1rem 1.1rem; background:var(--panel);
+             color:var(--text); margin:.6rem 0; }}
+.ms-empty .h {{ font-weight:600; margin-bottom:.25rem; }}
+.ms-empty .b {{ font-size:.9rem; color:var(--muted); }}
+.ms-q {{ font-size:.8rem; letter-spacing:.02em; color:var(--muted); text-transform:uppercase; margin:1.1rem 0 .3rem 0; }}
+.ms-answer {{ font-size:1rem; line-height:1.55; color:var(--text); }}
+.ms-status {{ display:inline-block; font-size:.74rem; font-weight:600; padding:.08rem .5rem; border-radius:4px;
+              border:1px solid currentColor; margin-right:.4rem; }}
+.ms-status.verified {{ color:var(--teal); }} .ms-status.provisional {{ color:var(--amber); }}
+.ms-status.unresolved {{ color:#B9C6D8; }}
+.ms-catalyst {{ border:1px solid var(--rule); border-left:3px solid var(--amber); border-radius:6px;
+                background:var(--panel); padding:.7rem .9rem; margin:.6rem 0; }}
+.ms-catalyst.A {{ border-left-color:var(--teal); }} .ms-catalyst.C {{ border-left-color:var(--slate); }}
+.ms-catalyst .lvl {{ font-size:.78rem; color:var(--muted); }}
+.ms-catalyst .hl {{ font-size:.98rem; color:var(--text); margin:.2rem 0; }}
+.ms-catalyst .src {{ font-size:.82rem; color:var(--muted); }}
+.ms-action {{ border:1px solid rgba(69,196,224,.5); border-radius:6px; background:rgba(69,196,224,.06);
+              padding:.8rem 1rem; margin:.4rem 0 .6rem 0; }}
+.ms-action .p {{ font-size:1.05rem; font-weight:600; color:var(--text); }}
+.ms-action .w {{ font-size:.9rem; color:#C9D3E2; margin:.3rem 0 .5rem 0; }}
+.ms-action ol {{ margin:.2rem 0 .5rem 1.2rem; padding:0; font-size:.92rem; color:var(--text); }}
+.ms-action .k {{ font-size:.8rem; color:var(--muted); margin-top:.35rem; }}
+.ms-action .v {{ font-size:.9rem; color:var(--text); }}
 @media (prefers-reduced-motion: reduce) {{ * {{ transition:none !important; animation:none !important; }} }}
 </style>
 """

@@ -88,6 +88,9 @@ NOISE_PATTERNS = [
     r"\btechnical (view|picks|outlook)\b",
     r"\bmultibagger\b",
     r"\bpenny stocks?\b",
+    r"\bshare price target\b.*\b20\d\d\b",          # multi-year price-forecast pages
+    r"\bstock of the day\b",
+    r"\b(sl|stop ?loss)\b.{0,40}\b(tgt|target)\b",   # trading calls with stop loss and targets
 ]
 # Round-ups that list many companies: may contain the explanation, but the headline alone does not show it.
 ROUNDUP_PATTERNS = [r"\bstocks? to (watch|buy|track)\b", r"\bstocks in (news|focus)\b", r"\bbuzzing stocks\b",

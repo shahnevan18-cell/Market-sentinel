@@ -99,6 +99,7 @@ sequenceDiagram
     O->>S: Validated findings and rubric
     S->>T: Risk metrics, exposure, stress tests
     S-->>O: submit_risk_assessment (checked)
+    O->>O: Action guidance from the record (evidence level, next action), audited
     O-->>U: Report, audit trail, saved record
 ```
 
@@ -120,6 +121,8 @@ sequenceDiagram
 | `agents/orchestrator.py` | Runs the roles, enforces required checks, handles failures, assembles and saves the record |
 | `agents/tools.py` | Tool specs, argument validation, budgets, audit trail |
 | `agents/hypotheses.py` | The five-hypothesis rubric and the confidence rule |
+| `agents/guidance.py` | Evidence levels (A, B, C), the business summary, the unresolved-case analysis and the single prioritised next action, built only from the record; recorded in the audit trail as "Action guidance" |
+| `analytics/alert_view.py` | The alert-table contract and filters, concise alert labels and plain-English alert reasons |
 | `agents/grounding.py` | Flags any figure in LLM text that does not match a tool output |
 | `agents/trace.py` | Model decisions and engine facts, read back from the audit trail for the interface and the LLM check |
 | `reports/report_builder.py` | The 14-section report in Markdown and printable HTML |

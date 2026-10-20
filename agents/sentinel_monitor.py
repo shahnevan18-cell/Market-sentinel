@@ -29,8 +29,8 @@ class MonitorOutput:
 def add_episodes(events: pd.DataFrame, calendar: pd.DatetimeIndex) -> pd.DataFrame:
     if events.empty:
         out = events.copy()
-        out["episode_id"] = pd.Series(dtype=str)
-        out["episode_day"] = pd.Series(dtype=int)
+        out["episode_id"] = pd.Series(dtype=object)
+        out["episode_day"] = pd.Series(dtype="int64")
         return out
     pos = {d: i for i, d in enumerate(calendar)}
     out = events.sort_values(["ticker", "date"]).copy()
@@ -72,8 +72,7 @@ class SentinelMonitor:
     def run(self, dataset: MarketDataset) -> MonitorOutput:
         scan = scan_universe(dataset.frames, dataset.universe, self.cfg, drop_dates=dataset.partial_dates())
         events = add_episodes(scan.events, scan.panel.calendar)
-        if not events.empty:
-            events["escalate"] = events["priority_score"] >= self.cfg.severity_high
+        events["escalate"] = (events["priority_score"] >= self.cfg.severity_high).astype(bool)
         last = scan.last_date
         recent = events[events["date"] == last] if (last is not None and not events.empty) else events.iloc[0:0]
         summary = {

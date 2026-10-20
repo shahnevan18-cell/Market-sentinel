@@ -314,22 +314,42 @@ def build_event_record(ticker: str, date: pd.Timestamp, row: pd.Series, universe
     }
 
 
+# The alert-table contract. Every frame of alerts, including one with zero rows, carries these columns, so
+# filtering and display code never meets a missing column (the Anomaly monitor crashed on exactly that).
+RECORD_COLUMNS = ["event_id", "ticker", "name", "sector", "date", "direction", "ret", "z_ret", "ret_median",
+                  "abnormal_ret", "z_abn", "beta", "mkt_ret", "z_mkt", "sector_index", "sector_ret", "z_sector",
+                  "peer_median_ret", "rel_peer_ret", "z_rel_peer", "volume", "volume_median", "volume_ratio",
+                  "z_volume", "vol_ratio", "vol_short_ann", "priority_score", "severity", "event_types",
+                  "triggers", "s_price", "s_abnormal", "s_volume", "s_regime"]
+DERIVED_COLUMNS = ["event_type", "event_type_short", "severity_rank"]
+EVENT_COLUMNS = RECORD_COLUMNS + DERIVED_COLUMNS
+_FLOAT_COLUMNS = ["ret", "z_ret", "ret_median", "abnormal_ret", "z_abn", "beta", "mkt_ret", "z_mkt", "sector_ret",
+                  "z_sector", "peer_median_ret", "rel_peer_ret", "z_rel_peer", "volume", "volume_median",
+                  "volume_ratio", "z_volume", "vol_ratio", "vol_short_ann", "priority_score", "s_price",
+                  "s_abnormal", "s_volume", "s_regime"]
+
+
+def empty_events() -> pd.DataFrame:
+    """A zero-row alert frame with the full column contract and sensible dtypes."""
+    out = pd.DataFrame({col: pd.Series(dtype=object) for col in EVENT_COLUMNS})
+    out["date"] = pd.Series(dtype="datetime64[ns]")
+    for col in _FLOAT_COLUMNS:
+        out[col] = pd.Series(dtype=float)
+    out["severity_rank"] = pd.Series(dtype=float)
+    return out
+
+
 def collect_events(features: dict[str, pd.DataFrame], universe: Universe, cfg: AnalysisConfig) -> pd.DataFrame:
     records = []
     for ticker, df in features.items():
         hits = df[df["is_event"]]
         for date, row in hits.iterrows():
             records.append(build_event_record(ticker, date, row, universe, cfg))
-    columns = ["event_id", "ticker", "name", "sector", "date", "direction", "ret", "z_ret", "ret_median",
-               "abnormal_ret", "z_abn", "beta", "mkt_ret", "z_mkt", "sector_index", "sector_ret", "z_sector",
-               "peer_median_ret", "rel_peer_ret", "z_rel_peer", "volume", "volume_median", "volume_ratio",
-               "z_volume", "vol_ratio", "vol_short_ann", "priority_score", "severity", "event_types",
-               "triggers", "s_price", "s_abnormal", "s_volume", "s_regime"]
-    events = pd.DataFrame(records, columns=columns)
-    if events.empty:
-        return events
-    events["event_type"] = events["event_types"].apply(lambda t: " + ".join(t))
-    events["event_type_short"] = events["event_types"].apply(
+    if not records:
+        return empty_events()
+    events = pd.DataFrame(records, columns=RECORD_COLUMNS)
+    events["event_type"] = events["event_types"].map(lambda t: " + ".join(t))
+    events["event_type_short"] = events["event_types"].map(
         lambda t: " + ".join(SHORT_TYPE.get(x, x) for x in t).capitalize())
     events["severity_rank"] = events["severity"].map(SEVERITY_ORDER)
     return events.sort_values(["date", "priority_score"], ascending=[False, False]).reset_index(drop=True)

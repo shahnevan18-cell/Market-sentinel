@@ -378,6 +378,9 @@ def test_bar_cached_mid_session_is_refetched_after_the_close(tmp_path, frame_fac
     ("Stocks to watch: Testco, Peerco and others", "uncertain"),
     ("Testco share price live updates", "unrelated"),
     ("Should you buy Testco shares after the fall?", "unrelated"),
+    ("Testco Share Price Target 2026, 2027, 2030, 2040, 2050", "unrelated"),    # forecast page seen live, 20 Oct
+    ("Stock Of The Day: Buy Testco Futures SL 4900 Tgt 4990", "unrelated"),     # trading tip seen live, 20 Oct
+    ("Testco jumps 5% as broker upgrades rating, raises target", "direct"),
     ("Sensex, Nifty end lower as FIIs sell banking stocks", "indirect"),
     ("Testco Power shares jump after tariff order", "unrelated"),     # a different company with a similar name
 ])

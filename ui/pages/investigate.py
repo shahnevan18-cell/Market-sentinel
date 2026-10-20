@@ -12,6 +12,8 @@ from agents.sentinel_monitor import recent_priority_alert
 from agents.trace import decision_trace, engine_facts
 from config.market import DISCLOSURE_TERMS_NOTE
 from reports.report_builder import build_html, build_markdown
+from agents.guidance import build_guidance
+from analytics.alert_view import alert_label
 from ui import components as c
 from ui.state import app_data, get_backend, get_settings
 from ui.theme import RELEVANCE_COLORS
@@ -53,8 +55,7 @@ def _log_line(e) -> str:
 
 
 def _event_label(row) -> str:
-    return (f"{c.short_symbol(row['ticker'])}  {row['name']}   {row['date']:%d %b %Y}   {row['event_type']}   "
-            f"(priority {row['priority_score']:.0f}, {row['severity'].lower()})")
+    return alert_label(row)
 
 
 def _engine_strip(rec: dict) -> str:
@@ -75,6 +76,99 @@ def _engine_strip(rec: dict) -> str:
                  "fixed tool order, narrative from templates, same tools and rubric"]
         cls = "warn" if fallback else ""
     return '<div class="ms-pills left">' + "".join(f'<span class="ms-pill {cls}">{p}</span>' for p in parts) + "</div>"
+
+
+def _catalyst_html(cat: dict) -> str:
+    if cat.get("headline"):
+        link = (f'<a href="{c.esc(cat["url"])}" target="_blank" rel="noopener">open source</a>'
+                if cat.get("url") else "no link supplied by the source")
+        retrieved = f' &middot; retrieved {c.esc(c.fmt_ist(cat["retrieved_at"]))}' if cat.get("retrieved_at") else ""
+        body = (f'<div class="hl">&ldquo;{c.esc(cat["headline"])}&rdquo;</div>'
+                f'<div class="src">{c.esc(cat.get("publisher"))} &middot; published {c.esc(cat.get("published_ist"))}'
+                f'{retrieved} &middot; {link} &middot; source ID {c.esc(cat.get("source_id"))}</div>'
+                + (f'<div class="src">Event date stated by the source: {c.esc(cat["event_date"])}'
+                   + (f' ({c.esc(cat["event_note"])})' if cat.get("event_note") else "") + "</div>"
+                   if cat.get("event_date") else ""))
+    else:
+        body = ""
+    return (f'<div class="ms-catalyst {c.esc(cat["level"])}"><div class="lvl">Catalyst evidence, level {c.esc(cat["level"])}: '
+            f'<b>{c.esc(cat["label"])}</b></div>{body}'
+            f'<div class="src" style="margin-top:.35rem">{c.esc(cat.get("statement", ""))}</div>'
+            f'<div class="src">{c.esc(cat.get("access_note", ""))}</div></div>')
+
+
+def _render_summary(rec: dict, g: dict) -> None:
+    expl, cat, act, unres = g["explanation"], g["catalyst"], g["action"], g.get("unresolved")
+    st.html('<div class="ms-q">A. What happened?</div>'
+            f'<div class="ms-answer">{c.esc(g["what_happened"])}</div>')
+
+    st.html('<div class="ms-q">B. What is the most plausible explanation?</div>'
+            f'<div class="ms-answer"><span class="ms-status {c.esc(expl["status"])}">{c.esc(expl["status"].capitalize())}</span>'
+            f'<b>{c.esc(expl["headline"])}</b></div>')
+    if unres:
+        st.markdown(unres["established"])
+        st.markdown("Two explanations remain plausible: " + " and ".join(
+            f"**{p['label'].lower()}** ({p['score']:.0f} points)" for p in unres["plausible"]) + ".")
+        st.markdown(unres["why_undistinguished"])
+        st.markdown("**Evidence that would settle it**")
+        for chk in unres["discriminating_checks"]:
+            line = f"- {chk['check']}."
+            if chk.get("if_yes"):
+                line += f" If found: {chk['if_yes']}."
+            if chk.get("if_no"):
+                line += f" If not: {chk['if_no']}."
+            st.markdown(line)
+    else:
+        st.caption(expl.get("status_text", ""))
+        cols = st.columns(2, gap="large")
+        with cols[0]:
+            st.markdown("**Supporting evidence**")
+            for item in expl.get("supporting") or ["None recorded."]:
+                st.markdown(f"- {item}")
+        with cols[1]:
+            st.markdown("**Against or limiting**")
+            for item in expl.get("contradicting") or ["Nothing material found."]:
+                st.markdown(f"- {item}")
+    st.html(_catalyst_html(cat))
+
+    st.html('<div class="ms-q">C. Recommended next action</div>')
+    steps = "".join(f"<li>{c.esc(step)}</li>" for step in act["steps"])
+    st.html(
+        f'<div class="ms-action" role="region" aria-label="Recommended next action"><div class="p">{c.esc(act["primary"])}</div>'
+        f'<div class="w">Why this action: {c.esc(act["why"])}</div><ol>{steps}</ol>'
+        f'<div class="k">What would change the assessment</div><div class="v">{c.esc(act["reassess_if"])}</div>'
+        f'<div class="k">What it should clarify</div><div class="v">{c.esc(act["expected_outcome"])}</div>'
+        f'<div class="k">When to hold back a stronger conclusion</div><div class="v">{c.esc(act["escalate_if"])}</div>'
+        f'<div class="k">{c.esc(act.get("advice_note", ""))}</div></div>')
+    if act.get("links"):
+        st.markdown("Official pages for manual verification (link-only): " + " · ".join(
+            f"[{link['label']}]({link['url']})" for link in act["links"]))
+    with st.expander("Evidence behind this action and limitations"):
+        for e in act.get("evidence") or []:
+            st.markdown(f"- `{e.get('ref')}`: {e.get('text')}")
+        for lim in act.get("limitations") or []:
+            st.markdown(f"- {lim}")
+
+    st.html('<div class="ms-q">D. What remains unknown?</div>')
+    for u in g["unknowns"] or ["No material question remains open beyond the limitations listed under the action."]:
+        st.markdown(f"- {u}")
+
+    with st.expander("E. Quantitative evidence and methodology", expanded=False):
+        inv, strat, rub = rec.get("investigator", {}), rec.get("strategist", {}), rec.get("rubric", {})
+        st.caption("Robust z-score: how many typical daily ranges a value sits from its recent median (3 or more is "
+                   "rare). Abnormal return: the part of the move the market model (beta times the NIFTY 50) does not "
+                   "explain. Beta: how strongly the stock usually moves with the market. VaR: the one-day loss "
+                   "exceeded on 5% of past days.")
+        st.markdown("**Technical summary**")
+        st.write(strat.get("executive_summary") or inv.get("summary") or "n/a")
+        st.markdown("**Investigator findings**")
+        for f in inv.get("key_findings") or []:
+            st.markdown(f"- {f}")
+        st.markdown(f"**Rubric:** {rub.get('conclusion', 'n/a')} {rub.get('confidence_explanation', '')}")
+        st.dataframe(pd.DataFrame([{"Explanation": r["label"], "Score": r["score"], "Verdict": r.get("verdict", "")}
+                                   for r in rub.get("results", [])]), hide_index=True, width="stretch",
+                     column_config={"Score": st.column_config.ProgressColumn(min_value=0, max_value=100, format="%.0f")})
+        st.caption("The Evidence, Hypotheses and Risk tabs hold every measure, criterion and risk figure.")
 
 
 def render() -> None:
@@ -113,6 +207,8 @@ def render() -> None:
     if preselected and event_id == preselected:
         st.caption("Preselected: the most recent high-priority alert of the last 10 sessions. Choose any other "
                    "alert above.")
+    sel_ev = ordered[ordered["event_id"] == event_id].iloc[0].to_dict()
+    c.alert_detail_panel(sel_ev, mon.scan.universe.short_label(mon.scan.universe.benchmark), mon.scan.config.lookback)
     st.session_state.selected_event = event_id
     st.session_state.selected_event_historical = historical
 
@@ -190,13 +286,20 @@ def render_record(rec: dict, mon) -> None:
     strat = rec.get("strategist", {})
     evid = rec.get("evidence", {})
     st.divider()
+    guidance = rec.get("guidance") or build_guidance(rec)
+    expl = guidance["explanation"]
     st.html(
         '<div class="ms-verdict">'
         f'<div class="k">{c.esc(ev.get("name"))} ({c.esc(c.short_symbol(ev.get("ticker")))}), {c.esc(str(ev.get("date"))[:10])}. '
-        f'Leading assessment, {c.esc(str(rub.get("confidence")).lower())} confidence</div>'
-        f'<div class="h">{c.esc(rub.get("leading_label"))}</div>'
-        f'<div class="c">{c.esc(rub.get("conclusion"))}</div></div>'
+        f'<span class="ms-status {c.esc(expl["status"])}">{c.esc(expl["status"].capitalize())}</span></div>'
+        f'<div class="h">{c.esc(expl["headline"])}</div>'
+        f'<div class="c">Next action: {c.esc(guidance["action"]["primary"])}.</div></div>'
     )
+    st.caption(f"Rubric: {rub.get('leading_label')}, {str(rub.get('confidence')).lower()} confidence. "
+               "Scores describe fit with the evidence, not proven cause.")
+    if not rec.get("guidance"):
+        st.caption("This report was saved before action guidance existed; the guidance shown is rebuilt from the "
+                   "saved evidence.")
     data = rec.get("data", {})
     meta = (f"Engine: investigator {eng.get('investigator')}, strategist {eng.get('strategist')}. "
             f"Data: {data.get('mode')} mode, {data.get('market') or 'market n/a'}, benchmark "
@@ -215,21 +318,7 @@ def render_record(rec: dict, mon) -> None:
 
     tabs = st.tabs(["Summary", "Evidence", "Hypotheses", "Risk", "Audit trail", "Export"])
     with tabs[0]:
-        left, right = st.columns([3, 2], gap="large")
-        with left:
-            c.section("Executive summary")
-            st.write(strat.get("executive_summary") or "n/a")
-            c.section("Investigator findings")
-            st.write(inv.get("summary") or "n/a")
-            for f in inv.get("key_findings") or []:
-                st.markdown(f"- {f}")
-        with right:
-            c.section("What remains unknown")
-            for u in inv.get("unknowns") or []:
-                st.markdown(f"- {u}")
-            c.section("Recommended follow-up checks")
-            for f in (inv.get("follow_up_checks") or []) + (strat.get("next_steps") or []):
-                st.markdown(f"- {f}")
+        _render_summary(rec, guidance)
         uv = rec.get("unverified_figures") or {}
         if uv:
             figs = sorted({x for who in uv.values() for v in who.values() for x in v})

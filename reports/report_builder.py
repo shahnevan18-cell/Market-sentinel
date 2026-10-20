@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import html as html_lib
 
+from agents.guidance import build_guidance
+
 from config.market import DISCLOSURE_TERMS_NOTE, fmt_inr, fmt_market_clock, fmt_market_time
 from config.settings import APP_NAME
 
@@ -84,10 +86,49 @@ def build_markdown(rec: dict) -> str:
     add(f"_{DISCLAIMER}_")
     add("")
 
+    g = rec.get("guidance") or build_guidance(rec)
+    expl, cat, act, unres = g["explanation"], g["catalyst"], g["action"], g.get("unresolved")
     add("## 1. Executive summary")
-    add(strat.get("executive_summary") or inv.get("summary") or "No summary available.")
+    add("**What happened?** " + g["what_happened"])
     add("")
-    add(f"**Assessment:** {rub.get('conclusion', 'n/a')}")
+    add(f"**What is the most plausible explanation?** {expl['headline']}.")
+    add("")
+    if unres:
+        add(unres["established"])
+        add("")
+        add("Two explanations remain plausible: " + " and ".join(
+            f"{p['label'].lower()} ({p['score']:.0f} points)" for p in unres["plausible"]) + ". "
+            + unres["why_undistinguished"])
+        add("")
+        add("| Evidence to check | If found | If not found |\n|---|---|---|")
+        for chk in unres["discriminating_checks"]:
+            add(f"| {_esc(chk['check'])} | {_esc(chk['if_yes']) or '-'} | {_esc(chk['if_no']) or '-'} |")
+    else:
+        add(f"Status: {expl.get('status_text')}")
+        if expl.get("supporting"):
+            add("")
+            add("Supporting evidence:")
+            add(_bullets(expl["supporting"]))
+        if expl.get("contradicting"):
+            add("")
+            add("Evidence against or limiting it:")
+            add(_bullets(expl["contradicting"]))
+    add("")
+    add(f"**Catalyst evidence: level {cat['level']}, {cat['label']}.** {_esc(cat.get('statement', ''))}")
+    if cat.get("url"):
+        add(f"Source: [{_esc(cat.get('publisher'))}]({cat['url']}), published {cat.get('published_ist')}, retrieved "
+            f"{_ist(cat.get('retrieved_at')) if cat.get('retrieved_at') else 'n/a'}; source ID `{cat.get('source_id')}`. "
+            f"{_esc(cat.get('access_note', ''))}")
+    elif cat.get("access_note"):
+        add(_esc(cat["access_note"]))
+    add("")
+    add(f"**Recommended next action:** {act['primary']}. {act['why']} (Full action in section 13.)")
+    add("")
+    add("**What remains unknown?**")
+    add(_bullets(g["unknowns"]) if g["unknowns"] else "No material question remains open beyond the limitations in "
+        "section 13.")
+    add("")
+    add("Sections 3 to 10 hold the quantitative evidence and methodology behind this summary.")
     add("")
 
     add("## 2. Security, event date and data timestamps")
@@ -232,8 +273,14 @@ def build_markdown(rec: dict) -> str:
         add("")
 
     add("## 10. Confidence assessment")
+    add(f"Rubric assessment: {rub.get('conclusion', 'n/a')}")
+    add("")
     add(f"Confidence: **{rub.get('confidence')}**. {rub.get('confidence_explanation')}")
     add("")
+    tech = strat.get("executive_summary") or inv.get("summary")
+    if tech:
+        add(f"Technical summary written by the agents: {tech}")
+        add("")
     add("The rubric adds or subtracts fixed points per criterion and clips each score to 0-100. A conclusion is only "
         "stated when the leading explanation scores at least 45 and leads by at least 10 points; otherwise the "
         f"outcome is 'insufficient evidence'. {rub.get('news_basis', '')}")
@@ -270,11 +317,41 @@ def build_markdown(rec: dict) -> str:
     add("")
 
     add("## 12. What remains unknown")
-    add(_bullets(inv.get("unknowns")))
+    add(_bullets(g["unknowns"]) if g["unknowns"] else "No material question remains open.")
+    other = [u for u in (inv.get("unknowns") or []) if u not in g["unknowns"]]
+    if other:
+        add("")
+        add("Standing limitations of the method:")
+        add(_bullets(other))
     add("")
 
-    add("## 13. Recommended follow-up checks")
-    add(_bullets((inv.get("follow_up_checks") or []) + (strat.get("next_steps") or [])))
+    add("## 13. Recommended next action")
+    add(f"**{act['primary']}.**")
+    add("")
+    add(f"Why this action: {act['why']}")
+    add("")
+    add("Steps, in order:")
+    for i, step in enumerate(act["steps"], start=1):
+        add(f"{i}. {_esc(step)}")
+    add("")
+    add(f"What would change the assessment: {act['reassess_if']}")
+    add("")
+    add(f"Expected outcome: {act['expected_outcome']}")
+    add("")
+    add(f"When to withhold a stronger conclusion: {act['escalate_if']}")
+    add("")
+    if act.get("evidence"):
+        add("Evidence behind this action:")
+        add(_bullets([f"{e.get('ref')}: {e.get('text')}" for e in act["evidence"]]))
+        add("")
+    if act.get("links"):
+        add("Official pages for manual verification (link-only): " + "; ".join(
+            f"[{_esc(link.get('label'))}]({link.get('url')})" for link in act["links"]) + ".")
+        add("")
+    add("Limitations:")
+    add(_bullets(act.get("limitations")))
+    add("")
+    add(f"_{act.get('advice_note', '')}_")
     add("")
 
     add("## 14. Investigation timeline and tool calls")

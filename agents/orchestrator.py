@@ -24,6 +24,7 @@ from typing import Callable
 import pandas as pd
 
 from agents.context import InvestigationContext
+from agents.guidance import build_guidance
 from agents.hypotheses import evaluate
 from agents.investigation_tools import build_investigator_tools, build_strategist_tools
 from agents.market_investigator import ACTOR as INVESTIGATOR, REQUIRED_TOOLS, MarketInvestigator
@@ -84,6 +85,7 @@ class InvestigationRecord:
     usage: dict = field(default_factory=dict)
     saved_to: str | None = None
     official_links: list = field(default_factory=list)   # NSE/BSE pages for manual verification (link-only)
+    guidance: dict = field(default_factory=dict)         # evidence level, business summary and next action
 
     def as_dict(self) -> dict:
         return to_jsonable(asdict(self))
@@ -343,7 +345,6 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
     created = datetime.now(timezone.utc)
     safe_id = re.sub(r"[^A-Za-z0-9]", "-", event_id)
     record_id = f"{safe_id}_{created:%Y%m%dT%H%M%S}"
-    audit.record(ORCHESTRATOR, "stage", "Final report", "ok", f"Report assembled as {record_id}.", stage="Final report")
     record = InvestigationRecord(
         record_id=record_id,
         created_at=created.isoformat(timespec="seconds"),
@@ -381,6 +382,18 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
         usage={"investigator": inv_out.usage, "strategist": strat_out.usage},
         official_links=to_jsonable(ctx.official_links),
     )
+    # 8. Action guidance: evidence level, business summary and one prioritised next action, derived from the
+    # record itself so a saved report can always be re-checked against its own evidence.
+    guidance = build_guidance(record.as_dict())
+    act, cat = guidance["action"], guidance["catalyst"]
+    audit.record(ORCHESTRATOR, "decision", "Action guidance", "ok",
+                 f"Catalyst evidence: level {cat['level']} ({cat['label']}). Explanation status: "
+                 f"{guidance['explanation']['status']}. Next action ({act['kind']}): {act['primary']}.",
+                 output=to_jsonable({"catalyst_level": cat["level"], "catalyst_source_id": cat.get("source_id"),
+                                     "action_kind": act["kind"], "evidence_refs": act["evidence"]}))
+    audit.record(ORCHESTRATOR, "stage", "Final report", "ok", f"Report assembled as {record_id}.", stage="Final report")
+    record.audit = [to_jsonable(e.as_dict()) for e in audit.entries]
+    record.guidance = to_jsonable(guidance)
     if save:
         try:
             save_record(record)

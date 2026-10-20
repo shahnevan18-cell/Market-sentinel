@@ -27,7 +27,12 @@ It is an educational analysis tool. It does not trade, does not give buy or sell
    evidence). A conclusion is stated only when one explanation clearly leads; otherwise the report says the cause is
    unresolved.
 5. The strategist computes VaR, the volatility regime and the exposure of an illustrative ₹1 crore portfolio, and
-   writes monitoring suggestions. The report and the full audit trail are saved and can be downloaded.
+   writes monitoring suggestions.
+6. The guidance step turns the record into a business-facing answer: what happened, the most plausible explanation
+   marked verified, provisional or unresolved, the catalyst evidence level (A verified company event, B potential
+   catalyst from a headline, C none identified) and one prioritised next action with its reasons, steps and the
+   finding that would change the assessment. Investigative guidance only, never buy or sell advice. The report and
+   the full audit trail are saved and can be downloaded.
 
 ## Indian market conventions
 
@@ -138,7 +143,7 @@ records it and any later runs on the India version.
 ## Tests
 
 ```powershell
-python -m pytest -q                  # 187 automated tests, no internet needed
+python -m pytest -q                  # 227 automated tests, no internet needed
 python scripts/validate_symbols.py   # live check of all 30 symbols (rows, INR, exchange, time zone)
 python scripts/smoke_test.py         # live check of Yahoo (NSE), Google News India and the full pipeline
 python scripts/llm_check.py          # real LLM investigation, needs a key in .env

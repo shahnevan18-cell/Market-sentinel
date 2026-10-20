@@ -142,7 +142,7 @@ Relevance labels: `direct` (a timely company-specific item that could plausibly 
 | Headline naming the company and a cause word (results, net profit, provisions, order, bags, acquisition, SEBI, RBI, USFDA, block deal, downgrade and so on) inside the window | `direct` |
 | Headline naming the company that only describes the move (tanks, zooms, slips, upper circuit) | `uncertain` |
 | Round-up of several stocks ("stocks to watch") | `uncertain` |
-| Tips, live price pages and holdings reports ("share price live", "should you buy", "multibagger") | `unrelated` |
+| Tips, live price pages, forecast pages and holdings reports ("share price live", "should you buy", "multibagger", multi-year "share price target 2026, 2027, 2030" pages, "stock of the day" calls with stop loss and targets) | `unrelated` |
 | Market words without the company name (Sensex, Nifty, FIIs, RBI policy, rupee) | `indirect` |
 | Anything published after the event-day close | `uncertain` at best |
 
@@ -281,3 +281,57 @@ and some unplanned days are genuinely unusual.
 
 On 20 October 2026 (Dussehra) the expected latest session is 19 October, and the app says no new session is expected
 that day. Muhurat trading on Sunday 8 November 2026 is announced; its timings are not yet notified.
+
+## 15. Evidence levels, business summary and next action
+
+After the rubric and the risk step, `agents/guidance.py` turns the record into the answer shown first in the Summary
+tab and section 1 of the report. It uses only the record: tool outputs, rubric inputs and scores, the retrieved news
+items with their timing, source type, publisher and links, the provider statuses, the validation results and the
+link-only official pages. Nothing is fetched or invented, and the step is written to the audit trail as "Action
+guidance" with the source ID it relied on.
+
+Catalyst evidence levels:
+
+| Level | Meaning | When |
+|---|---|---|
+| A, verified company event | A retrieved company announcement identifies the event | A company announcement inside the information window. Live NSE/BSE announcements are link-only, so only the synthetic demonstration announcements can reach level A in this version |
+| B, potential catalyst, not yet verified | A headline suggests a cause; its article and the official filing were not read | A direct headline inside the window. The candidate is the subject (results, order, deal, corporate action, management change, regulatory matter, rating change, operational update) reported by the most independent publishers, then the earliest report of it that names the company. Social-media posts are not counted as publishers, and tips and forecast pages are screened out |
+| C, no identified catalyst | No direct, timely item, or no news source could be searched | Otherwise; the two cases are kept apart |
+
+A headline never verifies a cause. When company news leads on a level-B headline, the explanation is marked
+provisional and the summary says, for example, that a headline reports quarterly results but the retrieved evidence
+does not establish the full content or that it explains this move, and that the results filing and its timing should
+be checked first. An explanation is marked verified only for a level-A announcement with High confidence. When the
+rubric is inconclusive, the summary states what is established, the two explanations still in play with their
+scores, why the evidence cannot separate them and which evidence would, with how each finding would move the
+assessment.
+
+The next action is chosen by fixed rules, in this order, so the most basic open question is settled first:
+
+1. Data that undermines the event's numbers: the alert not reproduced on as-of data, too little baseline history,
+   an unfinished session, no beta, or a data-quality error or large single-day gap on the event date. Routine notes,
+   such as a zero-volume day elsewhere in the history, are listed as limitations instead.
+2. A failed news search: check the official announcements by hand and re-run before calling anything unexplained.
+3. An unresolved tie: the check that separates the two explanations (for sector against company news, the company's
+   own filing in the window and the peers' shared driver).
+4. The leading explanation's weakest link: verify a level-B headline against the filing and its time, check the
+   broker behind a rating change and any company news under it, align a level-A announcement's time with the move,
+   search for a catalyst when the move is stock-specific but nothing names a cause, check announcements and deal
+   disclosures for unexplained volume (which is never treated as evidence of misconduct), or confirm a market or
+   sector move.
+
+Every action carries the reason, up to three steps, what would change the assessment, what it should clarify, when
+to hold back a stronger conclusion, the official pages to check (live data only) and the limitations. Figures in the
+guidance are copied from the record; no threshold, deadline or target is created for it. In demonstration mode,
+steps that need an exchange website say what the live step would be, because the companies are fictional.
+
+## 16. Sentinel grid colours
+
+The grid's default colour is alert priority, using the same bands that label every alert: Low below 30, Moderate 30
+to below 50, High 50 to below 70, Critical 70 and above, on an ordered scale from dim slate to red. Only alert cells
+carry a band. A session without an alert is a neutral colour, and a session with no data for that stock carries a
+cross, so missing data is never shown as a low score. Alert cells also show an arrow for the direction of the move and
+the score when cells are wide enough, so the grid does not rely on colour alone. The alternative view colours every
+cell by the robust z-score of the day's return, which measures how unusual the move was. Anomaly intensity and alert
+priority are related but not the same: priority also weighs market-relative movement, volume and the volatility
+regime. Neither says whether a stock is a good or bad investment.

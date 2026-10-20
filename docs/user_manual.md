@@ -22,8 +22,16 @@ the latest complete NSE session and how long ago the data was retrieved. Amber w
 a symbol failed. A blue note appears when the latest bar was fetched before 16:15 IST (the day is not final yet) or
 when today is an NSE trading holiday.
 
-The sentinel grid is the main picture: one row per stock, one column per session for the last 30 sessions, coloured
-by the robust z-score of that day's return. Hover a cell for the return and the z-score; amber squares mark alerts.
+The sentinel grid is the main picture: one row per stock, one column per NSE session. Choose the period (1 week,
+1 month, 3 months or a custom range of sessions), what the colour shows and the row order; Reset view returns to one
+month, alert priority and highest priority first. In the default Alert priority view, each alert cell is coloured by
+its priority band (Low under 30, Moderate 30 to under 50, High 50 to under 70, Critical 70 and above, the same
+thresholds that label every alert) and carries an arrow for the direction of the move and, when space allows, its
+score. Sessions without an alert are a neutral colour, and a cross marks a session with no data. The Anomaly
+intensity view instead colours every cell by the robust z-score of the day's return: how unusual the move was, which
+is not the same as how urgent it is. Hover a cell for the company, date, priority band, return, z-score and volume.
+Zoom with the + and - buttons at the top right of the chart or by dragging across an area; the house button resets
+the zoom. Click an alert cell, or pick it in "Alert in this period", to see its details and open its investigation.
 Below it, the latest session's moves are sorted by return, and the NIFTY 50, the sector indices and the SENSEX are
 compared over 1, 5 and 21 sessions. The watchlist table shows each share's last close in rupees. The alerts table
 lists the highest-priority alerts of the last 10 sessions; pick one and press Open in workspace. Data freshness and
@@ -32,8 +40,12 @@ exchange and data-quality notes.
 
 ## Anomaly monitor
 
-Filter alerts by security, date range, severity, alert type and minimum priority. Select a row to see the detail
-view: price and volume with the event marked (other alerts of the same stock in amber, the 60-session median volume
+Filter alerts by security, date range, severity, alert type and minimum priority. Clearing Severity or Alert type
+means "all", and a note says so. When no alert matches, a panel says so and offers Reset filters; when no market data
+is loaded, the page explains the data problem instead of reporting a calm market. Click a row, or use Selected alert
+(labels read "SYMBOL · date · alert type · Priority N", and typing a symbol jumps to it), to open the full-width
+alert panel: company and symbol, peer group, event date, alert type, priority and band, daily return, the NIFTY 50
+the same day, volume against its median and a plain-English reason the alert fired. Below it is the detail view: price and volume with the event marked (other alerts of the same stock in amber, the 60-session median volume
 as a dotted line), the three z-scores over time with the thresholds, the plain-language reasons the alert fired, the
 priority-score breakdown, and the baseline context (median return, beta, NIFTY 50 and sector-index moves, or a note
 that the group has no sector index, peer-relative return, volume ratio, volatility regime, episode).
@@ -49,13 +61,14 @@ stages and marks each one as its required steps finish; the right column logs ev
 model turns, validations and warnings) with its result. Presentation pacing adds a short pause after each step so an
 audience can follow; results are identical.
 
-The verdict box shows the leading assessment, its confidence and the conclusion. The strip under it names the engine
+The verdict box shows the explanation, its status (Verified, Provisional or Unresolved) and the recommended next
+action. The strip under it names the engine
 that produced the run: "LLM-directed" with the model turns and the number of tool calls the model chose, or
 "Rule-based protocol" when no LLM was used or the LLM step failed. The tabs below it, in reading order:
 
 | Tab | What it shows |
 |---|---|
-| Summary | The strategist's executive summary, the investigator's findings, what remains unknown and the follow-up checks |
+| Summary | A. What happened, in plain English. B. The most plausible explanation and its status, with the supporting and limiting evidence and the catalyst evidence card: level A (verified company event, a retrieved announcement), B (potential catalyst, not yet verified: the exact headline, publisher, publication time in IST, retrieval time and link, with the access limitation stated) or C (no identified catalyst). For an unresolved case: what is established, the two explanations still in play, why the evidence cannot separate them and the evidence that would. C. One recommended next action: why, up to three steps, what would change the assessment, what it should clarify, when to hold back a stronger conclusion, the official pages to check and its limitations. D. The material unknowns. E. Quantitative evidence and methodology, collapsed: the technical summary, findings, rubric scores and plain definitions of the terms |
 | Evidence | Price (₹) and volume up to the event date; event-day returns against the market model, NIFTY 50, sector index and peers; a table of measures; news with publication time in IST, timing, relevance, basis (LLM judgement or keyword heuristic) and links; the official NSE, BSE and SEBI pages to check by hand (link-only) |
 | Hypotheses | The five scores and, for each hypothesis, every criterion with its points and evidence |
 | Risk | VaR before the event (with confidence and lookback), the event move as a multiple of it, the volatility regime, exposure in the illustrative ₹1 crore portfolio and any hypothetical stress tests in rupees |

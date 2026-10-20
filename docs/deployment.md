@@ -48,7 +48,7 @@ Use this if you prefer to see each step, or if the launcher reports a problem.
 
 5. Run the app: `streamlit run app.py --server.address localhost`, then open http://localhost:8501. Stop it with
    Ctrl + C.
-6. Run the tests: `python -m pytest -q` (187 tests, no internet needed; about two minutes on the team laptop).
+6. Run the tests: `python -m pytest -q` (227 tests, no internet needed; about two minutes on the team laptop).
 7. Check every configured NSE symbol: `python scripts/validate_symbols.py`. It writes
    `docs/symbol_validation_result.md`; a FAIL means the symbol must be corrected or removed in `config/watchlist.py`.
    Then check the live providers: `python scripts/smoke_test.py`, or `python scripts/smoke_test.py --no-llm` to skip
