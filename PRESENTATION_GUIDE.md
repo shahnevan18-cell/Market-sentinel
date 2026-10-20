@@ -72,13 +72,16 @@ Investigator took six turns and ten tool calls of its own choosing; its first su
 tool had returned, so the grounding check sent it back and the corrected version passed. The Risk Strategist chose two
 stress scenarios itself. On live data (HCL Technologies, 13 October) the investigator ran five turns on real NSE prices
 and Indian headlines, and its one malformed request was refused by argument validation and corrected. Then Google's
-free daily quota ran out, the app said so at once, and the report was labelled as a rule-based fallback. Both runs are
-in Investigation history and in `docs/llm_check_result.md` and `docs/llm_check_live_result.md`.
+free daily quota ran out, the app said so at once, and the report was labelled as a rule-based fallback. Rerun that
+evening with a key from a fresh Google project, the live HCL case passed in full: both agents finished with the
+model on real NSE data, and the grounding check caught one invented figure, which the model then removed. Both passing
+runs are in Investigation history and in `docs/llm_check_result.md` (demo) and `docs/llm_check_live_result.md` (live).
 
-LLM quota on the day: the free tier's daily quota resets at midnight Pacific time, which is 12:30 IST on 21 October.
-Before then gemini-3.5-flash will refuse requests. Do not spend time on it: open the saved Saffron Bank run
-(SAFFRON-DEMO, 20 Oct, 16:28 IST) from Investigation history and show its Model decisions; it works offline. Any new
-investigation still completes with the rule-based engine and a red banner that says why.
+LLM quota on the day: the laptop's `.env` now holds a key from a fresh Google project, which had used one live run
+by the evening of 20 October. Free-tier quotas are per project and reset at midnight Pacific time (12:30 IST). Avoid
+extra test runs before the presentation. If a request is refused, open the saved live run (HCLTECH-NS-2026-10-13,
+20 Oct, 21:13 IST) from Investigation history and show its Model decisions; it works offline. Any new investigation
+still completes with the rule-based engine and a red banner that says why.
 
 ## The five-minute demonstration
 

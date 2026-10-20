@@ -1,0 +1,28 @@
+# Secrets: never commit these
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+venv/
+.pytest_cache/
+
+# Runtime data (re-created automatically); only the empty folders are kept
+data/*
+!data/cache/
+!data/investigations/
+data/cache/*
+!data/cache/.gitkeep
+data/investigations/*
+!data/investigations/.gitkeep
+
+# Shared zips and OS or editor files
+*.zip
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

@@ -40,7 +40,7 @@ The priority score ranks alerts for attention. It is not a measure of importance
 - The LLM can misjudge relevance or write misleading prose. Its relevance judgements are logged with rationales, its figures are checked against tool outputs (including rupee amounts in lakh and crore and Indian digit grouping), and the final scores come from the fixed rubric.
 - Headlines are untrusted text. The model is instructed not to follow instructions inside them, and it can only act through the registered tools, none of which can trade, send messages or change data.
 - Free tiers limit requests. On HTTP 429 the client waits as long as the provider asks, up to 65 seconds and twice; a longer wait or a used-up daily quota ends the model step, and the report shows the labelled rule-based output with the reason.
-- On 20 October 2026, gemini-3.5-flash completed both agents itself on the India demo data (PASS). On live NSE data the investigator ran five turns before the free tier's daily quota ran out; the app reported this and fell back to the labelled rule-based output. The daily quota resets at midnight Pacific time (12:30 IST).
+- On 20 October 2026, gemini-3.5-flash completed both agents itself on the India demo data (PASS). On live NSE data the first run stopped at the free tier's daily quota, and the app reported it and fell back to the labelled rule-based output; a rerun with a key from a fresh Google project passed in full. Free-tier quotas are counted per Google project and reset at midnight Pacific time (12:30 IST).
 - Without an LLM key, the investigation is a fixed protocol over the same tools. It is labelled as such and should not be described as AI reasoning.
 
 ## Responsible use
