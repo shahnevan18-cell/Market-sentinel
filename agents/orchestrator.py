@@ -13,6 +13,8 @@ Responsibilities
 """
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import json
 import re
 import time
@@ -31,6 +33,7 @@ from agents.market_investigator import ACTOR as INVESTIGATOR, REQUIRED_TOOLS, Ma
 from agents.risk_strategist import ACTOR as STRATEGIST, RiskStrategist
 from agents.sentinel_monitor import SentinelMonitor
 from agents.tools import AuditEntry, AuditLog, ToolRegistry, to_jsonable
+from providers.llm import PROVIDER_ERROR_CATEGORIES, classify_error, describe_error
 from analytics.anomaly_detection import ScanResult, scan_universe
 from config.settings import APP_VERSION, HISTORY_DIR, Settings
 from providers.llm import LLMBackend
@@ -39,6 +42,13 @@ from config.market import MARKET_FACTS, MARKET_ID, session_close_utc
 from providers.news_data import NewsService
 
 ORCHESTRATOR = "Orchestrator"
+RULES_REASONS = {
+    "selected": "selected by the user for this investigation.",
+    "no_credentials": "no LLM credentials are configured on this deployment.",
+    "config_problem": "the LLM settings could not be used (see the sidebar for the problem).",
+    "switched_off": "the LLM is switched off in the settings (LLM_PROVIDER).",
+    "locked": "the LLM is locked on this deployment until the passcode is entered.",
+}
 STAGES = [
     "Event validation",
     "Price and volume analysis",
@@ -187,7 +197,9 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
                       backend: LLMBackend | None = None, scan: ScanResult | None = None,
                       historical: bool = False, news_service: NewsService | None = None,
                       progress: Callable[[AuditEntry], None] | None = None,
-                      save: bool = True) -> InvestigationRecord:
+                      save: bool = True, rules_reason: str | None = None) -> InvestigationRecord:
+    """Run one investigation. `backend` None means the rule-based protocol; `rules_reason` says why (selected,
+    no_credentials, config_problem, switched_off or locked), so the record never confuses a choice with a failure."""
     started = time.perf_counter()
     audit = AuditLog()
     if progress:
@@ -247,6 +259,19 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
                                news_cutoff=cutoff)
 
     # 2-4. Investigation -----------------------------------------------------
+    if backend is not None:
+        host = urlparse(backend.cfg.base_url or "").netloc or backend.cfg.base_url
+        audit.record(ORCHESTRATOR, "decision", "Engine selection", "ok",
+                     f"Model-directed investigation: {backend.cfg.model} ({backend.cfg.vendor or backend.cfg.provider}, "
+                     f"{host}); key read from {backend.cfg.key_source or 'the configured variable'}. The model chooses "
+                     "the tools; every number comes from Python tools.",
+                     output={"engine": "llm", "model": backend.cfg.model, "vendor": backend.cfg.vendor,
+                             "endpoint_host": host, "key_source": backend.cfg.key_source})
+    else:
+        reason = rules_reason or "no_credentials"
+        audit.record(ORCHESTRATOR, "decision", "Engine selection", "ok",
+                     f"Rule-based protocol: {RULES_REASONS.get(reason, reason)} The same tools run in a fixed order.",
+                     output={"engine": "rules", "reason": reason})
     llm_errors: list[str] = []
     investigator = MarketInvestigator(ctx, audit, backend, budget=settings.llm.max_tool_calls,
                                       max_turns=settings.llm.max_turns)
@@ -257,10 +282,6 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
             if a.get("source_id") in ctx.news_items:
                 ctx.assessments[a["source_id"]] = {"relevance": a["relevance"], "rationale": a.get("rationale", ""),
                                                    "basis": "LLM judgement"}
-    skipped = enforce_required_checks(ctx, audit)
-    if skipped:
-        warnings.append("Orchestrator ran required checks the investigator skipped: " + ", ".join(skipped))
-
     inv_submission = inv_out.submission
     if inv_out.engine == "llm" and inv_out.status != "completed":
         msg = f"The AI investigation did not complete ({inv_out.error}). Findings below come from the rule-based engine."
@@ -270,6 +291,10 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
         fallback = investigator.run_rules(actor="Market Investigator (rule-based fallback)")
         inv_submission = fallback.submission
         inv_engine = "rules (fallback after LLM failure)"
+    # After any fallback, so a failed model call does not make the orchestrator repeat checks the fallback runs anyway.
+    skipped = enforce_required_checks(ctx, audit)
+    if skipped:
+        warnings.append("Orchestrator ran required checks the investigator skipped: " + ", ".join(skipped))
 
     # 5. Hypothesis evaluation on the complete evidence ---------------------------
     ctx.rubric = evaluate(ctx)
@@ -324,7 +349,10 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
 
     llm_label = backend.label if backend else None
     if not backend:
-        engine_summary = "Rule-based (no LLM)"
+        engine_summary = "Rule-based (" + {"selected": "selected by the user", "no_credentials": "no LLM configured",
+                                           "config_problem": "LLM configuration problem",
+                                           "switched_off": "LLM switched off", "locked": "LLM locked"}.get(
+            rules_reason or "no_credentials", "no LLM") + ")"
     elif inv_engine == "llm" and strat_engine == "llm":
         engine_summary = "LLM: " + llm_label
     elif inv_engine != "llm" and strat_engine != "llm":
@@ -332,12 +360,42 @@ def run_investigation(event_id: str, dataset: MarketDataset, settings: Settings,
     else:
         engine_summary = (f"Mixed ({llm_label}): investigator {'LLM' if inv_engine == 'llm' else 'rule-based fallback'}, "
                           f"strategist {'LLM' if strat_engine == 'llm' else 'rule-based fallback'}")
+    error_categories = [classify_error(e) for e in llm_errors]
+    if not backend:
+        mode = f"rules_{rules_reason or 'no_credentials'}"
+        mode_text = "Rule-based protocol: " + RULES_REASONS.get(rules_reason or "no_credentials", "")
+    elif inv_engine == "llm" and strat_engine == "llm":
+        mode, mode_text = "llm", (f"{backend.cfg.vendor or 'The LLM'} ({backend.cfg.model}) directed the investigation "
+                                  "and the risk assessment: it chose the tools, read their results and submitted "
+                                  "validated findings.")
+    elif inv_engine != "llm" and strat_engine != "llm":
+        first = error_categories[0] if error_categories else "provider_error"
+        who = f"{backend.cfg.vendor or 'The LLM'} ({backend.cfg.model})"
+        if first in PROVIDER_ERROR_CATEGORIES:
+            mode, mode_text = "llm_provider_fallback", (f"{who} was called, but the provider returned an error, so the "
+                                                        "rule-based protocol produced this report. Reason: "
+                                                        + describe_error(first))
+        else:
+            mode, mode_text = "llm_failed", (f"{who} ran, but its output could not be used, so the rule-based "
+                                             "protocol produced this report. Reason: " + describe_error(first))
+    else:
+        first = error_categories[0] if error_categories else "provider_error"
+        mode, mode_text = "mixed", (f"{backend.cfg.vendor or 'The LLM'} ({backend.cfg.model}) directed part of the run; "
+                                    f"the {'investigation' if inv_engine != 'llm' else 'risk step'} fell back to rules. "
+                                    "Reason: " + describe_error(first))
     engine = {
         "requested": llm_label or "Rule-based reasoning engine (no LLM configured)",
         "investigator": inv_engine,
         "strategist": strat_engine,
         "llm_errors": llm_errors,
+        "error_categories": error_categories,
         "summary": engine_summary,
+        "mode": mode,
+        "mode_text": mode_text,
+        "llm_attempted": backend is not None,
+        "model": backend.cfg.model if backend else None,
+        "vendor": backend.cfg.vendor if backend else None,
+        "key_source": backend.cfg.key_source if backend else None,
         "investigator_turns": inv_out.turns,
         "strategist_turns": strat_out.turns,
     }

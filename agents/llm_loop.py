@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from agents.grounding import check_submission
 from agents.tools import AuditLog, ToolRegistry
-from providers.llm import LLMBackend, LLMError
+from providers.llm import LLMBackend, LLMError, classify_error, redact
 
 
 @dataclass
@@ -51,7 +51,7 @@ def run_llm_agent(*, backend: LLMBackend, actor: str, system: str, user_prompt: 
     try:
         conv = backend.start(system, tools)
     except Exception as exc:  # noqa: BLE001
-        outcome.error = f"Could not start the LLM conversation: {exc}"
+        outcome.error = redact(f"Could not start the LLM conversation: {exc}", [backend.cfg.api_key])
         audit.record(actor, "error", "llm_start", "error", outcome.error, stage=stage)
         return outcome
     conv.add_user_text(user_prompt)
@@ -73,12 +73,14 @@ def run_llm_agent(*, backend: LLMBackend, actor: str, system: str, user_prompt: 
         except LLMError as exc:
             for w in _waits(conv):
                 audit.record(actor, "warning", "rate limit", "warning", w, stage=stage)
-            outcome.error = str(exc)
+            outcome.error = redact(str(exc), [backend.cfg.api_key])
             outcome.turns = turn
-            audit.record(actor, "error", "llm_call", "error", f"LLM call failed: {exc}", stage=stage)
+            audit.record(actor, "error", "llm_call", "error", f"LLM call failed: {outcome.error}", stage=stage,
+                         output={"model": backend.cfg.model, "error_category": classify_error(outcome.error)})
             break
         except Exception as exc:  # noqa: BLE001 - malformed provider response: fall back instead of crashing
-            outcome.error = f"Unusable response from the LLM provider ({type(exc).__name__}: {str(exc)[:200]})"
+            outcome.error = redact(f"Unusable response from the LLM provider ({type(exc).__name__}: {str(exc)[:200]})",
+                                   [backend.cfg.api_key])
             outcome.turns = turn
             audit.record(actor, "error", "llm_call", "error", outcome.error, stage=stage)
             break
@@ -92,8 +94,9 @@ def run_llm_agent(*, backend: LLMBackend, actor: str, system: str, user_prompt: 
         note = (result.text or "").strip().replace("\n", " ")
         audit.record(actor, "llm_turn", f"model turn {turn}", "info",
                      f"Requested: {names}" + (f". Model note: {note[:240]}" if note else ""), stage=stage,
-                     output={"tools_requested": [c.name for c in result.tool_calls], "model_note": note[:800],
-                             "stop_reason": result.stop_reason})
+                     output={"model": backend.cfg.model, "tools_requested": [c.name for c in result.tool_calls],
+                             "model_note": note[:800], "stop_reason": result.stop_reason,
+                             "usage": {k: v for k, v in (result.usage or {}).items() if isinstance(v, (int, float))}})
 
         if not result.tool_calls:
             nudges += 1

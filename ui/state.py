@@ -1,18 +1,23 @@
 """Session state, data loading and the sidebar controls shared by every page."""
 from __future__ import annotations
 
+import hmac
 import os
+import re
 import time
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from agents.sentinel_monitor import MonitorOutput, SentinelMonitor
-from config.settings import AUTHORS, AnalysisConfig, Settings, load_settings
+from config.settings import AUTHORS, AnalysisConfig, LLMConfig, Settings, load_settings
 from config.watchlist import get_universe
-from providers.llm import LLMBackend, make_backend
+from providers.llm import LLMBackend, make_backend, probe, redact
 from providers.market_data import MarketDataset, YFinanceProvider, load_demo_dataset, load_live_dataset, make_provider
 
 MODE_LABELS = {"live": "Live NSE market data", "demo": "Demonstration data (synthetic)"}
@@ -22,14 +27,57 @@ FAILED_RETRY_SECONDS = 120
 THRESHOLD_KEYS = ("lookback", "z_price", "z_abnormal", "z_volume")
 
 
-def _secrets_to_env() -> None:
-    """On hosted deployments, copy top-level Streamlit secrets into environment variables."""
+APP_SETTING = re.compile(r"^(LLM|MS|GEMINI|GOOGLE|ANTHROPIC)_[A-Z0-9_]+$")
+_SECRET_COPIES: dict[str, str] = {}   # variables this process set from Streamlit secrets, so an edited secret updates
+SECRETS_REPORT: dict = {"read": False, "names": [], "other_count": 0, "notes": [], "error": None}
+
+
+def _secrets_to_env(secrets: Mapping | None = None) -> dict:
+    """Copy Streamlit secrets into environment variables, so a hosted app is configured the same way as .env.
+
+    Top-level values are copied. App settings written in lower case or placed inside a table (for example
+    [gemini]) are lifted to their upper-case name. A variable this function set earlier is updated when the secret
+    changes; a variable set outside the secrets is left alone. The report lists names, never values.
+    """
+    report = {"read": False, "names": [], "other_count": 0, "notes": [], "error": None}
     try:
-        for key, value in st.secrets.items():
-            if isinstance(value, (str, int, float)) and key not in os.environ:
-                os.environ[key] = str(value)
-    except Exception:
-        pass
+        items = list((st.secrets if secrets is None else secrets).items())
+        report["read"] = True
+    except FileNotFoundError:
+        items = []   # no secrets file: normal when running locally with .env
+    except Exception as exc:  # noqa: BLE001 - a broken secrets file must not stop the app
+        items = []
+        report["error"] = (f"The app's secrets could not be read ({type(exc).__name__}). Check the format in the "
+                           'secrets box: each value needs quotes, for example GEMINI_API_KEY = "your-key".')
+    found: list[tuple[str, object, str]] = []
+    for key, value in items:
+        if isinstance(value, Mapping):
+            for sub, inner in value.items():
+                if isinstance(inner, (str, int, float)) and APP_SETTING.match(str(sub).upper()):
+                    found.append((str(sub).upper(), inner, f"{sub} inside [{key}]"))
+            continue
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            continue
+        name = str(key).upper() if APP_SETTING.match(str(key).upper()) else str(key)
+        found.append((name, value, str(key)))
+    for name, value, origin in found:
+        if not APP_SETTING.match(name):
+            report["other_count"] += 1
+            continue
+        text = str(value).strip()
+        report["names"].append(name)
+        if origin != name:
+            report["notes"].append(f"{origin} was read as {name}.")
+        current = os.environ.get(name)
+        if current is None or current == _SECRET_COPIES.get(name) or (origin == name and current == str(value)):
+            if current != text:
+                os.environ[name] = text
+            _SECRET_COPIES[name] = text
+        elif current != text:
+            report["notes"].append(f"{name} is also set outside the secrets; that value is used.")
+    SECRETS_REPORT.clear()
+    SECRETS_REPORT.update(report)
+    return report
 
 
 def init_state() -> None:
@@ -40,7 +88,7 @@ def init_state() -> None:
     ss.setdefault("thresholds", {})
     ss.setdefault("selected_event", None)
     ss.setdefault("selected_event_historical", False)
-    ss.setdefault("use_llm", True)
+    ss.setdefault("engine_choice", "llm")
     ss.setdefault("current_record", None)
 
 
@@ -56,11 +104,38 @@ def get_settings() -> Settings:
     return load_settings(analysis_config())
 
 
+def _passcode() -> str:
+    return (os.environ.get("MS_LLM_PASSCODE") or "").strip()
+
+
+def llm_locked() -> bool:
+    """True when this deployment asks for a passcode before it calls the model and this session has not given it."""
+    return bool(_passcode()) and not st.session_state.get("llm_unlocked", False)
+
+
+def check_passcode(entered: str) -> bool:
+    code = _passcode()
+    return bool(code) and hmac.compare_digest((entered or "").strip().encode(), code.encode())
+
+
+def engine_plan() -> tuple[LLMBackend | None, str | None]:
+    """The backend for the next investigation and, when it is None, why the rule-based protocol runs instead."""
+    cfg = get_settings().llm
+    if not cfg.enabled:
+        return None, "switched_off" if cfg.switched_off else "config_problem" if cfg.problem else "no_credentials"
+    if st.session_state.get("engine_choice", "llm") == "rules":
+        return None, "selected"
+    if llm_locked():
+        return None, "locked"
+    return make_backend(cfg), None
+
+
 def get_backend() -> LLMBackend | None:
-    s = get_settings()
-    if not st.session_state.get("use_llm", True):
-        return None
-    return make_backend(s.llm)
+    return engine_plan()[0]
+
+
+def engine_name(cfg: LLMConfig) -> str:
+    return "Gemini" if cfg.is_gemini else "Claude" if cfg.provider == "anthropic" else "LLM"
 
 
 def _load_live(force: bool) -> MarketDataset:
@@ -170,15 +245,7 @@ def sidebar_controls() -> None:
                     ss.thresholds = {}
                     st.rerun()
 
-        st.markdown("**Reasoning engine**")
-        s = get_settings()
-        if s.llm.enabled:
-            ss.use_llm = st.toggle("Use the LLM for investigations", value=ss.get("use_llm", True))
-            st.caption(f"Configured: {s.llm.describe()}. Numbers always come from Python tools.")
-        else:
-            ss.use_llm = False
-            st.caption("No LLM key found, so investigations use the rule-based engine. Add ANTHROPIC_API_KEY "
-                       "(or LLM_API_KEY) to .env, or to the app's secrets when hosted, to enable it.")
+        _engine_controls()
 
         if st.button("Reset session", width="stretch",
                      help="Clear the selected event and the open investigation. Cached data is kept."):
@@ -189,6 +256,93 @@ def sidebar_controls() -> None:
         st.caption("Business Analytics project, Theme 4: Agentic AI. "
                    + " and ".join(f"{n} ({r})" for n, r, _ in AUTHORS) + ".")
         st.caption("Educational analysis only. Not investment advice.")
+
+
+def _engine_controls() -> None:
+    """Sidebar: which engine the next investigation uses, the passcode lock and a one-request connection test."""
+    ss = st.session_state
+    cfg = get_settings().llm
+    st.markdown("**Reasoning engine**")
+    if not cfg.enabled:
+        st.caption(cfg.status_text())
+    else:
+        name = engine_name(cfg)
+        labels = {"llm": f"{name} (model-directed)", "rules": "Rule-based protocol"}
+        st.radio("Reasoning engine", ["llm", "rules"], format_func=labels.get, key="engine_choice",
+                 label_visibility="collapsed",
+                 help="Model-directed: the model chooses which tools to run and writes the findings, and every "
+                      "number still comes from Python tools. Rule-based: the same tools run in a fixed order.")
+        st.caption(cfg.status_text() + " Numbers always come from Python tools.")
+        if ss.get("engine_choice") == "llm" and llm_locked():
+            st.caption(f"This deployment asks for a passcode before it calls {name}, so a shared link cannot use "
+                       "up the daily quota. Until it is entered, investigations use the rule-based protocol.")
+            with st.form("llm_unlock", border=False):
+                entered = st.text_input("Passcode", type="password", key="llm_passcode_input")
+                if st.form_submit_button("Unlock", width="stretch"):
+                    if check_passcode(entered):
+                        ss.llm_unlocked = True
+                        st.rerun()
+                    time.sleep(1.0)   # slows guessing
+                    st.error("That passcode is not right.")
+        if st.button("Test connection", width="stretch", disabled=llm_locked(),
+                     help=f"Sends one small request to {name} and reports what happened. It uses one request of "
+                          "the daily quota and does not run an investigation."):
+            with st.spinner(f"Calling {cfg.model}"):
+                result = probe(cfg)
+            result["checked_at"] = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%H:%M:%S IST")
+            result["config"] = (cfg.model, cfg.key_source, cfg.base_url)
+            ss.llm_health = result
+        health = ss.get("llm_health")
+        if health and health.get("config") == (cfg.model, cfg.key_source, cfg.base_url):
+            if health["ok"]:
+                st.success(f"Connected at {health['checked_at']}: {health['model']} answered with a tool call in "
+                           f"{health['latency_ms'] / 1000:.1f} s.")
+            else:
+                st.error(f"Connection test failed at {health['checked_at']}. "
+                         f"{health.get('summary') or health['message']}")
+                if health.get("detail"):
+                    with st.expander("Provider message (key removed)"):
+                        st.caption(health["detail"])
+    with st.expander("Engine diagnostics"):
+        _engine_diagnostics(cfg)
+
+
+def _engine_diagnostics(cfg: LLMConfig) -> None:
+    """Names and settings only: no key, passcode or other secret value is ever shown."""
+    rep = SECRETS_REPORT
+    if rep.get("read"):
+        names = ", ".join(rep["names"]) or "none of this app's settings"
+        extra = f" (plus {rep['other_count']} other secret(s) this app does not use)" if rep.get("other_count") else ""
+        st.caption(f"Hosted secrets found: {names}{extra}.")
+    else:
+        st.caption("No hosted secrets file: settings come from environment variables or .env.")
+    if rep.get("error"):
+        st.caption(rep["error"])
+    for note in rep.get("notes", []):
+        st.caption(note)
+    key_names = [n for n in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY", "ANTHROPIC_API_KEY") if os.environ.get(n)]
+    st.caption("Key variables present: " + (", ".join(key_names) or "none") + ".")
+    if cfg.enabled:
+        st.caption(f"Model {cfg.model} at {urlparse(cfg.base_url or '').netloc or cfg.base_url}; key read from "
+                   f"{cfg.key_source}. Passcode lock: {'on' if _passcode() else 'off'}.")
+    elif cfg.problem:
+        st.caption(redact(cfg.problem))
+
+
+def engine_preview() -> tuple[str, str]:
+    """(kind, text) describing which engine the next investigation will use and why."""
+    backend, reason = engine_plan()
+    cfg = get_settings().llm
+    if backend is not None:
+        return "llm", (f"Engine for this run: {engine_name(cfg)} ({cfg.model}) will choose the tools and write the "
+                       "findings. Each investigation uses about 9 to 12 model requests. If the provider fails, the "
+                       "rule-based protocol finishes the run and the report says so.")
+    why = {"selected": "selected in the sidebar.",
+           "no_credentials": "no LLM credentials are configured on this deployment.",
+           "config_problem": "the LLM settings could not be used (see Engine diagnostics in the sidebar).",
+           "switched_off": "the LLM is switched off by LLM_PROVIDER.",
+           "locked": "the model is locked until the passcode is entered in the sidebar."}.get(reason, "")
+    return "rules", f"Engine for this run: rule-based protocol, because {why}"
 
 
 def now_utc() -> datetime:

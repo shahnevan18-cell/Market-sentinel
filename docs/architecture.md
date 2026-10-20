@@ -14,7 +14,7 @@ flowchart LR
         GN[Google News RSS<br/>India edition]
         YN[Yahoo headlines via yfinance]
         OFF[NSE / BSE / SEBI pages<br/>link-only, never fetched]
-        LLM[LLM API, optional]
+        LLM[LLM API, optional<br/>Gemini or Anthropic]
     end
     subgraph Data layer
         MK[config/market.py<br/>IST sessions, NSE holidays, INR]
@@ -22,6 +22,7 @@ flowchart LR
         DQ[analytics/data_quality.py<br/>checks and safe cleaning]
         NS[providers/news_data.py<br/>headlines, timing, official links]
         SV[providers/symbol_validation.py<br/>symbol checks]
+        ID[providers/intraday.py<br/>5-minute bars, in-memory store]
     end
     subgraph Analytics
         AD[anomaly_detection.py<br/>robust z, market model, peers]
@@ -29,6 +30,7 @@ flowchart LR
         BA[benchmark_analysis.py]
         RM[risk_metrics.py]
         HR[historical_replay.py]
+        IA[intraday.py<br/>time-of-day baselines]
     end
     subgraph Agents
         MON[Sentinel Monitor<br/>rule-based]
@@ -69,6 +71,7 @@ flowchart LR
     HR --> UI
     MON --> UI
     REP --> UI
+    YF --> ID --> IA --> UI
 ```
 
 ## One investigation, step by step
@@ -107,18 +110,20 @@ sequenceDiagram
 
 | Module | Responsibility |
 |---|---|
-| `config/settings.py` | Every threshold, window and weight; environment variables for keys and options |
+| `config/settings.py` | Every threshold, window and weight; environment variables for keys and options; picks the LLM provider (Gemini, Anthropic or another OpenAI-compatible API) from the keys present and names any configuration problem without showing a value |
 | `config/market.py` | NSE conventions in one place: Asia/Kolkata, 09:15 to 15:30 IST session, 16:15 IST final-bar rule, holiday table 2024 to 2026, INR and rupee formatting, official link-only pages |
 | `config/watchlist.py` | The live universe (25 NSE shares, NIFTY 50, 3 NSE sector indices, SENSEX), peer groups, company aliases, the fictional demo universe and the illustrative ₹1 crore portfolio |
 | `providers/market_data.py` | yfinance provider (dates read in the exchange's time zone), throttling, retries, circuit breaker, CSV cache, demo generator on the NSE calendar with ten planted scenarios |
 | `providers/news_data.py` | Google News India, Yahoo headlines, fictional demo announcements, 15:30 IST timing windows, alias-aware keyword relevance, link-only official pages |
 | `providers/symbol_validation.py` | Checks each configured symbol: rows, history, INR, exchange, time zone, type, freshness, volume |
-| `providers/llm.py` | Anthropic and OpenAI-compatible tool-calling clients over plain HTTPS, with provider-directed waits on HTTP 429 |
+| `providers/llm.py` | Anthropic and OpenAI-compatible tool-calling clients over plain HTTPS (Gemini through Google's OpenAI-compatible endpoint), provider-directed waits on HTTP 429, error categories, key redaction in every error message, and a one-request connection test |
+| `providers/intraday.py` | Optional 5-minute bars from Yahoo through yfinance: the IST bar grid, a flag for the bar still forming, the market clock (sessions, holidays, a ten-minute close grace), an in-memory store shared by all sessions with at most one request per bar interval, the last good bars kept when a refresh fails, and one status per refresh (Fresh, Waiting for new data, Cached, Stale or Unavailable) |
+| `analytics/intraday.py` | Same time-of-day robust z for the latest complete bar: 5-minute return, return relative to NIFTY 50 and volume; display only when fewer than 15 earlier sessions have that bar |
 | `analytics/*` | All calculations: returns, robust z-scores, market model, peers, score, VaR, replay outcomes |
 | `agents/sentinel_monitor.py` | Agent 1: scans the universe, groups alerts into episodes, flags events to escalate |
 | `agents/market_investigator.py` | Agent 2: LLM tool loop or rule-based protocol, plus template findings |
 | `agents/risk_strategist.py` | Agent 3: risk interpretation from tools, LLM or rule-based |
-| `agents/orchestrator.py` | Runs the roles, enforces required checks, handles failures, assembles and saves the record |
+| `agents/orchestrator.py` | Runs the roles, enforces required checks, handles failures, records which engine was selected and why, labels each run's engine mode from what actually happened, assembles and saves the record |
 | `agents/tools.py` | Tool specs, argument validation, budgets, audit trail |
 | `agents/hypotheses.py` | The five-hypothesis rubric and the confidence rule |
 | `agents/guidance.py` | Evidence levels (A, B, C), the business summary, the unresolved-case analysis and the single prioritised next action, built only from the record; recorded in the audit trail as "Action guidance" |
@@ -127,11 +132,14 @@ sequenceDiagram
 | `agents/trace.py` | Model decisions and engine facts, read back from the audit trail for the interface and the LLM check |
 | `reports/report_builder.py` | The 14-section report in Markdown and printable HTML |
 | `ui/*` | Theme, shared components and the six pages |
+| `ui/state.py` | Copies hosted secrets into the environment (changed values applied, nested tables reported by name only), the sidebar engine selector, the optional passcode lock and the Test connection button |
+| `ui/intraday_panel.py` | Intraday watch on Market overview: auto-refresh toggle with a 5, 10 or 15 minute timer (a Streamlit timed fragment), Refresh now, request and bar times, status and explanation |
 | `launch.py`, `run_app.bat`, `run_app.command` | One-click start: build `.venv` on first run, install packages, start the app on a free port, open the browser |
 | `scripts/make_share_zip.py` | Clean zip for sharing, leaving out `.env`, `.venv`, cached data and saved investigations |
 | `scripts/validate_symbols.py` | Live check of all 30 configured symbols on the user's computer; writes `docs/symbol_validation_result.md` |
 | `scripts/smoke_test.py` | Live check of every provider and the full pipeline on the user's computer |
-| `scripts/llm_check.py` | One real LLM investigation, printed turn by turn; reports PASS, PARTIAL or FAIL per agent |
+| `scripts/llm_check.py` | One real LLM investigation, printed turn by turn; reports PASS, PARTIAL or FAIL per agent and the engine mode; `--probe` sends a single test request instead |
+| `scripts/intraday_check.py` | Live check of which yfinance intraday intervals return bars for a few NSE shares and NIFTY 50; writes `docs/intraday_check_result.md` |
 
 ## Design decisions
 
@@ -167,3 +175,15 @@ evidence layer returns the official pages for a manual check and never claims an
 
 Historical investigations run on a dataset physically truncated at the event date, with news after that day's close
 excluded, so the as-of guarantee does not depend on every function being written carefully.
+
+The engine label comes from what happened, not from the configuration. A key being present does not make a run
+model-directed. The orchestrator records which engine was selected and why, and sets the run's engine mode from the
+outcome of each model step: model-directed, partly model-directed, attempted but failed (with the error category),
+or rule-based because the user chose it, no key is configured, the settings are unusable, the LLM is switched off
+or it is locked by a passcode. Keys never appear in the audit trail, the saved record or an error message: provider
+error text is redacted before it is stored.
+
+Intraday bars are a separate path. They are kept in memory by the server process, requested only while someone has
+the Market overview page open (a timed fragment) or presses Refresh now, compared only with the same time of day,
+and never feed the daily priority score or trigger an LLM call. The daily analytics keep their own daily bars and
+disk cache.

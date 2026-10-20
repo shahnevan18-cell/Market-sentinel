@@ -8,6 +8,7 @@ import streamlit as st
 
 from analytics.alert_view import alert_label
 from ui import components as c
+from ui import intraday_panel
 from ui.nav import open_investigation
 from ui.state import app_data
 
@@ -139,6 +140,7 @@ def render() -> None:
          "sub": f"{int((recent['severity'] == 'Critical').sum()) if len(recent) else 0} critical"},
     ])
 
+    intraday_panel.render(ds)
     _sentinel_grid_section(scan)
 
     left, right = st.columns([1, 1], gap="large")

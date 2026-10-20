@@ -130,11 +130,18 @@ class DataConfig:
     default_mode: str = "live"          # live | demo
 
 
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+# Names the app reads for an LLM key, in priority order. Only the name is ever shown, never the value.
+KEY_NAMES = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY", "ANTHROPIC_API_KEY")
+DISABLED_PROVIDERS = {"none", "off", "rules", "rule-based", "disabled"}
+
+
 @dataclass(frozen=True)
 class LLMConfig:
     provider: str = "none"              # none | anthropic | openai_compatible
     model: str = ""
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)   # never shown in a repr, log or page
     base_url: str | None = None
     max_tool_calls: int = 14
     max_turns: int = 10
@@ -142,16 +149,39 @@ class LLMConfig:
     max_tokens: int = 8000
     rate_limit_retries: int = 2         # retries after HTTP 429/503, waiting as long as the provider asks
     rate_limit_max_wait: float = 65.0   # longest single wait in seconds; a longer requested wait fails the step
+    vendor: str = ""                    # Google Gemini | Anthropic | OpenAI-compatible
+    key_source: str | None = None       # the variable the key came from (name only)
+    problem: str | None = None          # why the LLM cannot be used although LLM settings were given
+    switched_off: bool = False          # LLM_PROVIDER explicitly set to none
 
     @property
     def enabled(self) -> bool:
-        return self.provider in {"anthropic", "openai_compatible"} and bool(self.api_key) and bool(self.model)
+        return (self.problem is None and self.provider in {"anthropic", "openai_compatible"} and bool(self.api_key)
+                and bool(self.model))
+
+    @property
+    def is_gemini(self) -> bool:
+        return "generativelanguage.googleapis.com" in (self.base_url or "")
 
     def describe(self) -> str:
         if not self.enabled:
             return "No LLM configured (rule-based reasoning engine)"
-        label = "Anthropic API" if self.provider == "anthropic" else f"OpenAI-compatible API ({self.base_url})"
-        return f"{self.model} via {label}"
+        if self.provider == "anthropic":
+            return f"{self.model} via Anthropic API"
+        if self.is_gemini:
+            return f"{self.model} via Google Gemini (OpenAI-compatible endpoint)"
+        return f"{self.model} via OpenAI-compatible API ({self.base_url})"
+
+    def status_text(self) -> str:
+        """Plain description of the configuration state for the interface; never includes the key."""
+        if self.enabled:
+            return f"Configured: {self.describe()}, key read from {self.key_source}."
+        if self.switched_off:
+            return "The LLM is switched off by LLM_PROVIDER, so investigations use the rule-based engine."
+        if self.problem:
+            return f"LLM configuration problem: {self.problem} Investigations use the rule-based engine."
+        return ("No LLM credentials are configured, so investigations use the rule-based engine. To enable Gemini, "
+                "set GEMINI_API_KEY in .env, or in the app's secrets when hosted.")
 
 
 @dataclass(frozen=True)
@@ -162,34 +192,67 @@ class Settings:
 
 
 def load_llm_config() -> LLMConfig:
+    """Resolve the LLM from environment variables (or hosted secrets copied into them).
+
+    Gemini can be enabled with GEMINI_API_KEY alone: the provider, Google's OpenAI-compatible endpoint and the model
+    gemini-3.5-flash are then the defaults, and LLM_MODEL or LLM_BASE_URL override them. Any setting that cannot be
+    used is reported in `problem` instead of silently disabling the LLM.
+    """
     provider = (_env("LLM_PROVIDER") or "").lower()
-    anthropic_key = _env("ANTHROPIC_API_KEY")
-    generic_key = _env("LLM_API_KEY")
+    keys = {name: _env(name) for name in KEY_NAMES}
+    model, base_url = _env("LLM_MODEL"), _env("LLM_BASE_URL")
+    common = dict(max_tool_calls=_env_int("LLM_MAX_TOOL_CALLS", 14), timeout=_env_float("LLM_TIMEOUT", 240.0),
+                  rate_limit_retries=_env_int("LLM_RATE_LIMIT_RETRIES", 2),
+                  rate_limit_max_wait=_env_float("LLM_RATE_LIMIT_MAX_WAIT", 65.0))
+
+    def first_key(*names):
+        for name in names:
+            if keys.get(name):
+                return keys[name], name
+        return None, None
+
+    if provider in DISABLED_PROVIDERS:
+        return LLMConfig(provider="none", switched_off=True)
     if not provider:
-        provider = "anthropic" if anthropic_key else ("openai_compatible" if generic_key else "none")
-    retries = _env_int("LLM_RATE_LIMIT_RETRIES", 2)
-    max_wait = _env_float("LLM_RATE_LIMIT_MAX_WAIT", 65.0)
+        if keys["ANTHROPIC_API_KEY"] and not (keys["GEMINI_API_KEY"] or keys["GOOGLE_API_KEY"]):
+            provider = "anthropic"
+        elif keys["GEMINI_API_KEY"] or keys["GOOGLE_API_KEY"]:
+            provider = "gemini"
+        elif keys["LLM_API_KEY"]:
+            looks_gemini = (model or "").lower().startswith("gemini") or "googleapis" in (base_url or "")
+            provider = "gemini" if looks_gemini or not (model or base_url) else "openai_compatible"
+        else:
+            return LLMConfig(provider="none")
+
     if provider == "anthropic":
-        return LLMConfig(
-            provider="anthropic",
-            model=_env("LLM_MODEL", "claude-sonnet-5-5"),
-            api_key=anthropic_key or generic_key,
-            base_url=_env("ANTHROPIC_API_URL", "https://api.anthropic.com"),
-            max_tool_calls=_env_int("LLM_MAX_TOOL_CALLS", 14),
-            timeout=_env_float("LLM_TIMEOUT", 240.0),
-            rate_limit_retries=retries, rate_limit_max_wait=max_wait,
-        )
-    if provider in {"openai", "openai_compatible", "gemini", "groq"}:
-        return LLMConfig(
-            provider="openai_compatible",
-            model=_env("LLM_MODEL", ""),
-            api_key=generic_key,
-            base_url=_env("LLM_BASE_URL", "https://api.openai.com/v1"),
-            max_tool_calls=_env_int("LLM_MAX_TOOL_CALLS", 14),
-            timeout=_env_float("LLM_TIMEOUT", 240.0),
-            rate_limit_retries=retries, rate_limit_max_wait=max_wait,
-        )
-    return LLMConfig(provider="none")
+        key, source = first_key("ANTHROPIC_API_KEY", "LLM_API_KEY")
+        return LLMConfig(provider="anthropic", model=model or "claude-sonnet-5-5", api_key=key, key_source=source,
+                         base_url=_env("ANTHROPIC_API_URL", "https://api.anthropic.com"), vendor="Anthropic",
+                         problem=None if key else "LLM_PROVIDER is anthropic but ANTHROPIC_API_KEY is not set.",
+                         **common)
+    if provider in {"gemini", "google"}:
+        key, source = first_key("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY")
+        problem = None if key else "LLM_PROVIDER is gemini but no key was found (set GEMINI_API_KEY)."
+        if key and (model or "").lower().startswith("claude"):
+            # An old .env can still carry LLM_MODEL=claude-...; sending it to Google would only fail later.
+            problem = (f"LLM_MODEL is {model}, an Anthropic model, but the key is for Google Gemini. Remove LLM_MODEL "
+                       f"or set it to a Gemini model such as {DEFAULT_GEMINI_MODEL}.")
+        return LLMConfig(provider="openai_compatible", model=model or DEFAULT_GEMINI_MODEL, api_key=key,
+                         key_source=source, base_url=base_url or GEMINI_BASE_URL, vendor="Google Gemini",
+                         problem=problem, **common)
+    if provider in {"openai", "openai_compatible", "groq"}:
+        key, source = first_key("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+        problem = None
+        if not key:
+            problem = f"LLM_PROVIDER is {provider} but LLM_API_KEY is not set."
+        elif not model:
+            problem = "LLM_MODEL is not set, so the app does not know which model to call."
+        return LLMConfig(provider="openai_compatible", model=model or "", api_key=key, key_source=source,
+                         base_url=base_url or "https://api.openai.com/v1",
+                         vendor="Google Gemini" if "googleapis" in (base_url or "") else "OpenAI-compatible",
+                         problem=problem, **common)
+    return LLMConfig(provider="none", problem=(f"LLM_PROVIDER is '{provider}', which is not supported. Use gemini, "
+                                               "openai_compatible or anthropic."))
 
 
 def load_settings(analysis: AnalysisConfig | None = None) -> Settings:

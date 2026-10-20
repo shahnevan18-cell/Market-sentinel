@@ -357,6 +357,9 @@ def build_markdown(rec: dict) -> str:
     add("## 14. Investigation timeline and tool calls")
     add(f"Engine: investigator = {eng.get('investigator')}, strategist = {eng.get('strategist')}. "
         f"Run time {rec.get('duration_s')} s.")
+    if eng.get("mode_text"):
+        add("")
+        add(f"Engine mode `{eng.get('mode')}`: {eng['mode_text']}")
     if eng.get("llm_errors"):
         add("")
         for e in eng["llm_errors"]:

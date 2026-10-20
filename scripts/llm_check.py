@@ -1,7 +1,7 @@
 """Check the real LLM path end to end: python scripts/llm_check.py
 
-Runs one investigation with the LLM configured in .env (ANTHROPIC_API_KEY, or LLM_PROVIDER, LLM_API_KEY,
-LLM_BASE_URL and LLM_MODEL for an OpenAI-compatible provider). By default it uses the built-in demonstration
+Runs one investigation with the LLM configured in .env (GEMINI_API_KEY alone is enough for Gemini; LLM_PROVIDER,
+LLM_API_KEY, LLM_BASE_URL and LLM_MODEL also work, as does ANTHROPIC_API_KEY). By default it uses the built-in demonstration
 data, so the only network service involved is the LLM provider; add --live to investigate a recent alert in
 live market data instead.
 
@@ -19,6 +19,7 @@ provider asks (up to LLM_RATE_LIMIT_MAX_WAIT seconds) before giving up.
     python scripts/llm_check.py                    # demonstration data, most recent high-priority alert
     python scripts/llm_check.py --live             # live NSE data (needs Yahoo Finance and Google News too)
     python scripts/llm_check.py --event SAFFRON.DEMO:2026-09-30
+    python scripts/llm_check.py --probe            # one small request: is the key working, is the quota left?
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ from agents.sentinel_monitor import SentinelMonitor, recent_priority_alert  # no
 from agents.trace import decision_trace, engine_facts  # noqa: E402
 from config.settings import load_settings  # noqa: E402
 from config.watchlist import get_universe  # noqa: E402
-from providers.llm import make_backend  # noqa: E402
+from providers.llm import make_backend, probe  # noqa: E402
 from providers.market_data import load_demo_dataset, load_live_dataset  # noqa: E402
 
 
@@ -72,16 +73,24 @@ def main() -> int:
     parser.add_argument("--live", action="store_true", help="use live market data instead of demonstration data")
     parser.add_argument("--event", help="event id such as SAFFRON.DEMO:2026-09-30 (default: most recent "
                                         "high-priority alert)")
+    parser.add_argument("--probe", action="store_true",
+                        help="send one small request (uses 1 request of the daily quota) and report the result")
     args = parser.parse_args()
 
     settings = load_settings()
     backend = make_backend(settings.llm)
     if backend is None:
-        print("No LLM is configured, so there is nothing to check.\n"
-              "Add ANTHROPIC_API_KEY=... to .env (or LLM_PROVIDER, LLM_API_KEY, LLM_BASE_URL and LLM_MODEL for an "
-              "OpenAI-compatible provider), then run this again.")
+        print(settings.llm.status_text() + "\nNothing to check until a key is configured.")
         return 2
-    print(f"LLM under test: {settings.llm.describe()}")
+    print(f"LLM under test: {settings.llm.describe()}, key read from {settings.llm.key_source}")
+    if args.probe:
+        result = probe(settings.llm)
+        if result["ok"]:
+            print(f"PROBE OK: {result['model']} answered with a tool call in {result['latency_ms'] / 1000:.1f} s "
+                  "(1 request used).")
+            return 0
+        print(f"PROBE FAILED ({result['category']}): {result['message']}")
+        return 1
     if args.live:
         ds = load_live_dataset(get_universe("live"), settings)
         if not ds.frames:
@@ -114,7 +123,9 @@ def main() -> int:
                    "rule-based notes (see LLM errors)")
     else:
         verdict = "FAIL: the investigation fell back to the rule-based engine (see LLM errors)"
+    eng = rec.get("engine") or {}
     summary = [
+        f"Engine mode: {eng.get('mode')}. {eng.get('mode_text', '')}",
         f"Engine: {facts['summary']}",
         f"Investigator model turns {facts['investigator_model_turns']}, strategist model turns "
         f"{facts['strategist_model_turns']}; successful tool calls by actor {facts['tool_calls_by_actor']}",

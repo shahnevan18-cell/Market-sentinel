@@ -15,7 +15,7 @@ from reports.report_builder import build_html, build_markdown
 from agents.guidance import build_guidance
 from analytics.alert_view import alert_label
 from ui import components as c
-from ui.state import app_data, get_backend, get_settings
+from ui.state import app_data, engine_plan, engine_preview, get_settings
 from ui.theme import RELEVANCE_COLORS
 
 STAGE_HINTS = {
@@ -58,24 +58,53 @@ def _event_label(row) -> str:
     return alert_label(row)
 
 
+ENGINE_MODES = {
+    "llm": ("Model-directed", "live"),
+    "mixed": ("Partly model-directed, partly rule-based fallback", "warn"),
+    "llm_failed": ("Rule-based fallback: the model's output could not be used", "warn"),
+    "llm_provider_fallback": ("Rule-based fallback after a provider error", "warn"),
+    "rules_selected": ("Rule-based protocol, selected in the sidebar", ""),
+    "rules_no_credentials": ("Rule-based protocol: no LLM credentials configured", ""),
+    "rules_config_problem": ("Rule-based protocol: LLM settings unusable", "warn"),
+    "rules_switched_off": ("Rule-based protocol: LLM switched off", ""),
+    "rules_locked": ("Rule-based protocol: model locked by passcode", ""),
+}
+FALLBACK_MODES = {"mixed", "llm_failed", "llm_provider_fallback"}
+
+
+def engine_mode(rec: dict) -> str:
+    """The engine mode of a record; records saved before modes existed are classified from their engine fields."""
+    eng = rec.get("engine") or {}
+    if eng.get("mode") in ENGINE_MODES:
+        return eng["mode"]
+    inv, strat = eng.get("investigator") == "llm", eng.get("strategist") == "llm"
+    if inv and strat:
+        return "llm"
+    if inv or strat:
+        return "mixed"
+    return "llm_failed" if eng.get("llm_errors") else "rules_no_credentials"
+
+
 def _engine_strip(rec: dict) -> str:
     f = engine_facts(rec)
+    eng = rec.get("engine") or {}
+    mode = engine_mode(rec)
+    head, cls = ENGINE_MODES[mode]
+    parts = [f"<b>{c.esc(head)}</b>"]
     if f["any_llm"]:
         by = f["tool_calls_by_actor"]
         model_calls = by.get("Market Investigator", 0) + by.get("Risk Strategist", 0)
-        parts = [f"<b>LLM-directed</b> ({c.esc(rec.get('engine', {}).get('requested'))})",
-                 f"model turns: investigator {f['investigator_model_turns']}, strategist {f['strategist_model_turns']}",
-                 f"tool calls chosen by the model: {model_calls}",
-                 f"required checks the orchestrator had to run: {f['tool_calls_enforced_by_orchestrator']}"]
+        parts += [c.esc(eng.get("model") or eng.get("requested") or ""),
+                  f"model turns: investigator {f['investigator_model_turns']}, strategist {f['strategist_model_turns']}",
+                  f"tool calls chosen by the model: {model_calls}",
+                  f"required checks the orchestrator had to run: {f['tool_calls_enforced_by_orchestrator']}"]
         if f["tokens"]:
             parts.append(f"tokens {f['tokens']:,}")
-        cls = "live" if not f["llm_errors"] else "warn"
     else:
-        fallback = bool(f["llm_errors"])
-        parts = ["<b>Rule-based protocol</b>" + (" after an LLM failure" if fallback else " (no LLM in use)"),
-                 "fixed tool order, narrative from templates, same tools and rubric"]
-        cls = "warn" if fallback else ""
-    return '<div class="ms-pills left">' + "".join(f'<span class="ms-pill {cls}">{p}</span>' for p in parts) + "</div>"
+        if mode in FALLBACK_MODES and eng.get("model"):
+            parts.append(f"model called: {c.esc(eng['model'])}")
+        parts.append("fixed tool order, narrative from templates, same tools and rubric")
+    return '<div class="ms-pills left">' + "".join(f'<span class="ms-pill {cls}">{p}</span>' for p in parts if p) + "</div>"
 
 
 def _catalyst_html(cat: dict) -> str:
@@ -212,14 +241,11 @@ def render() -> None:
     st.session_state.selected_event = event_id
     st.session_state.selected_event_historical = historical
 
-    backend = get_backend()
+    backend, rules_reason = engine_plan()
     settings = get_settings()
-    if backend:
-        st.caption(f"Reasoning engine: {backend.label}. The model chooses tools and judges headline relevance; "
-                   "every number comes from Python tools.")
-    else:
-        st.caption("Reasoning engine: rule-based protocol (no LLM in use). The same tools run in a fixed order and "
-                   "the narrative is written from templates. It is not presented as AI reasoning.")
+    kind, text = engine_preview()
+    st.caption(text + ("" if kind == "llm" else " The same tools run in a fixed order and the narrative is written "
+                                                "from templates. It is not presented as AI reasoning."))
 
     b1, b2 = st.columns([1, 3], vertical_alignment="center")
     with b1:
@@ -249,7 +275,7 @@ def render() -> None:
 
         try:
             record = run_investigation(event_id, ds, settings, backend=backend, scan=mon.scan, historical=historical,
-                                       progress=on_entry)
+                                       progress=on_entry, rules_reason=rules_reason)
             st.session_state.current_record = record.as_dict()
             st.toast("Investigation completed and saved to history." if record.saved_to else
                      "Investigation completed, but it could not be saved to history (see the warning below).")
@@ -309,8 +335,15 @@ def render_record(rec: dict, mon) -> None:
             f"Run time {rec.get('duration_s')} s.")
     st.caption(meta)
     st.html(_engine_strip(rec))
-    for err in eng.get("llm_errors") or []:
-        c.banner(err, "bad")
+    mode = engine_mode(rec)
+    if mode in FALLBACK_MODES:
+        c.banner(eng.get("mode_text") or " ".join(eng.get("llm_errors") or []), "bad")
+        if eng.get("llm_errors"):
+            with st.expander("Provider and model messages (keys removed)"):
+                for err in eng["llm_errors"]:
+                    st.caption(err)
+    elif eng.get("mode_text"):
+        st.caption(eng["mode_text"])
     other = [w for w in rec.get("warnings", []) if w not in (eng.get("llm_errors") or [])]
     for w in other:
         if not w.startswith("Demonstration mode"):

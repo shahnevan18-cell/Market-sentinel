@@ -106,46 +106,75 @@ broad market fall, a sector-wide rise in oil, gas and power, and an isolated fal
 announcement in it is fictional. The Historical replay page lists the scenarios and opens any of them as an as-of
 investigation.
 
+## Intraday watch (optional, live data only)
+
+The Market overview has an Intraday watch: 5-minute bars for the NIFTY 50 and the 25 stocks from Yahoo through
+yfinance, which are unofficial and may be delayed. Nothing is requested until you press Refresh now or turn on
+Auto-refresh (every 5, 10 or 15 minutes, default 10). The status line shows when the last request was sent, the newest
+complete bar in IST and one status: Fresh, Waiting for new data, Cached, Stale or Unavailable, with a sentence that
+explains it (for example, the market has closed, or Yahoo has not yet published the next bar).
+
+The latest complete bar of each stock is compared with the same time of day in up to 40 earlier sessions, for its
+return, its return relative to the NIFTY 50 and its volume, and flagged at a robust |z| of 4. With fewer than 15
+earlier sessions a stock is shown for display only. A bar still forming is never used, a missing bar is never filled
+and missing volume is never treated as zero. The intraday watch is separate from the daily alerts: it changes no
+priority score, starts no investigation and never calls the LLM.
+
+The refresh runs only while the page is open in a browser. Bars are kept in the server's memory, shared by everyone
+using the app and lost when it restarts; nothing collects bars in the background. Demonstration mode has no intraday
+bars, and none are simulated.
+
 ## Optional: connect an LLM
 
-Leave the keys empty and investigations use the rule-based engine, which is labelled as such. To let a model drive
-the investigator and strategist, put one of these in `.env`:
+Leave the keys empty and investigations use the rule-based protocol, which is labelled as such. To let Google Gemini
+drive the investigator and strategist, one line in `.env` is enough:
 
 ```
-ANTHROPIC_API_KEY=your-key
-LLM_MODEL=claude-sonnet-5-5
+GEMINI_API_KEY=your-key
 ```
 
-or, for any OpenAI-compatible endpoint (for example a Google Gemini key):
+The app then uses Google's OpenAI-compatible endpoint and gemini-3.5-flash (set `LLM_MODEL` to change the model). An
+Anthropic key works as `ANTHROPIC_API_KEY`, and any other OpenAI-compatible endpoint as `LLM_PROVIDER=openai_compatible`
+with `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL`; `.env.example` shows all three. A Claude chat subscription does
+not include API access. On a hosted copy, put the same names in the app's secrets instead of `.env`.
 
-```
-LLM_PROVIDER=openai_compatible
-LLM_API_KEY=your-key
-LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-LLM_MODEL=gemini-3.5-flash
-```
+The sidebar shows what the app found: "Configured: gemini-3.5-flash via Google Gemini ... key read from
+GEMINI_API_KEY", or "No LLM credentials are configured", or the name of the setting that cannot be used. With a key
+present you choose the engine for the next investigation (Gemini, model-directed, or the rule-based protocol), and
+Test connection sends one small request to check the key, the model and tool calling. On a public deployment,
+`MS_LLM_PASSCODE` makes visitors enter a passcode before the model can be called, so a shared link cannot use up the
+quota.
 
-A Claude chat subscription does not include API access; the API needs its own key and credit. Google AI Studio offers
-a free tier for Gemini keys with per-minute and per-day limits. When the provider answers HTTP 429, the app waits as
-long as the provider asks (up to 65 seconds, twice) and then falls back to the rule-based engine with the reason
-shown. Restart the app after editing `.env`.
+Every report names the engine that actually ran: model-directed, partly model-directed, a rule-based fallback after a
+provider error (with the reason, such as a daily quota and its reset time), a fallback because the model's output
+could not be used, or the rule-based protocol with the reason it was used. Keys never appear in the app, the reports,
+the audit trail or error messages.
+
+Google AI Studio's free tier has per-minute and per-day limits that belong to the Google project, not the key. Daily
+limits reset at midnight US Pacific time, 12:30 IST (13:30 IST from November to mid-March). One investigation uses
+about 9 to 12 requests. When the provider answers HTTP 429 for a per-minute limit, the app waits as long as the
+provider asks (up to 65 seconds, twice); a daily limit fails at once and the report says when it resets. Restart the
+app after editing `.env`.
 
 To check the LLM path end to end, run `python scripts/llm_check.py`. It investigates the most recent high-priority
 alert in the demonstration data, prints every model turn with the tools the model chose and what they returned, saves
 the run and writes `docs/llm_check_result.md`. It reports PASS, PARTIAL (the model completed the investigation but
-the risk step fell back) or FAIL. Add `--live` to investigate a live NSE alert.
+the risk step fell back) or FAIL, and the engine mode. Add `--live` to investigate a live NSE alert, or use `--probe`
+to send a single test request instead.
 
-Status on 20 Oct 2026: with gemini-3.5-flash the Market Investigator completed a full investigation on its own (5
-model turns, 9 tool calls it chose, no checks the orchestrator had to force, every figure grounded), and the Risk
-Strategist then hit the free-tier limit (HTTP 429). That run used the earlier US demo data; `docs/test_report.md`
-records it and any later runs on the India version.
+Status on 20 Oct 2026: with gemini-3.5-flash both agents completed with the model on the synthetic Saffron Bank case
+and on live NSE data (HCL Technologies, 13 Oct 2026). In the live run the investigator chose 9 tool calls over 5 turns
+and the strategist 5 over 4; the grounding check caught one figure that no tool had returned, and the model removed
+it. `docs/llm_check_result.md` and `docs/llm_check_live_result.md` hold the two runs.
 
 ## Tests
 
 ```powershell
-python -m pytest -q                  # 227 automated tests, no internet needed
+python -m pytest -q                  # 297 automated tests, no internet needed
 python scripts/validate_symbols.py   # live check of all 30 symbols (rows, INR, exchange, time zone)
 python scripts/smoke_test.py         # live check of Yahoo (NSE), Google News India and the full pipeline
+python scripts/intraday_check.py     # live check of Yahoo's intraday intervals for NIFTY 50 and four stocks
+python scripts/llm_check.py --probe  # one request: key, model, tool calling and quota
 python scripts/llm_check.py          # real LLM investigation, needs a key in .env
 ```
 
@@ -154,9 +183,9 @@ recorded during the build.
 
 ## Deployment
 
-The app is ready for Streamlit Community Cloud (entry point `app.py`, dependencies in `requirements.txt`, settings
-through secrets) but has not been deployed. `docs/deployment.md` gives the exact steps for GitHub and Community Cloud
-and the checks to run on the public URL.
+A public copy runs on Streamlit Community Cloud (entry point `app.py`, dependencies in `requirements.txt`, settings
+through secrets). `docs/deployment.md` gives the steps for GitHub and Community Cloud, how to add the Gemini key as a
+secret, and the checks to run on the public URL after each update.
 
 ## Project structure
 
@@ -169,15 +198,17 @@ market_sentinel/
   config/market.py            NSE conventions: time zone, session times, holidays, currency, official links
   config/watchlist.py         the 25-stock NSE watchlist, indices, peer groups and the fictional demo universe
   config/settings.py          thresholds, windows, weights and environment variables
-  providers/                  market data (yfinance, cache, demo), news, symbol validation, LLM clients
-  analytics/                  returns, anomaly detection, scoring, benchmark and peers, risk, replay, data quality
+  providers/                  market data (yfinance, cache, demo), intraday bars, news, symbol validation, LLM clients
+  analytics/                  returns, anomaly detection, scoring, benchmark and peers, risk, replay, data quality,
+                              intraday time-of-day baselines
   agents/                     monitor, investigator, strategist, orchestrator, tools, rubric, grounding check
   reports/                    Markdown and HTML report builder
-  ui/                         theme, shared components, the six pages
+  ui/                         theme, shared components, the six pages, the intraday panel
   tests/                      pytest suite and fictional fixtures
   scripts/validate_symbols.py live check of every configured NSE symbol
   scripts/smoke_test.py       live provider check for your own machine
-  scripts/llm_check.py        runs one real LLM investigation and prints the model's decisions
+  scripts/llm_check.py        runs one real LLM investigation and prints the model's decisions (--probe: one request)
+  scripts/intraday_check.py   checks which intraday intervals Yahoo returns for NSE symbols
   scripts/make_share_zip.py   builds a clean zip to share
   requirements-lock.txt       exact package versions verified on a fresh Python 3.12 environment
   PRESENTATION_GUIDE.md       opening, five-minute demo, checklist, examiner questions
@@ -210,7 +241,9 @@ market_sentinel/
 | "Session in progress" pill | The latest bar was fetched before 16:15 IST; it is excluded until the day is final. Refresh after 16:15 IST. |
 | Some symbols marked stale or unavailable | Their refresh failed; the cached copy is shown with its original time, or the symbol is listed as unavailable. Run `scripts/validate_symbols.py`. |
 | News sources show "failed" | Network or the source is down. The investigation continues on price evidence and says news was unavailable. |
-| LLM step shows HTTP 429 | Free-tier rate limit. The app already waited as asked; try again in a minute, or tomorrow if the message says the daily quota is used up. |
+| LLM step shows HTTP 429 | Free-tier rate limit. The app already waited as asked; try again in a minute. If the message says the daily quota is used up, it resets at 12:30 IST, or use a key from another Google project. |
+| Hosted app says "No LLM credentials are configured" | The key is only in your laptop's `.env`. Add `GEMINI_API_KEY = "your-key"` to the app's secrets on Streamlit Community Cloud and reboot the app. |
+| Intraday watch says "Waiting for new data" | No newer complete bar exists yet: the market is closed, or Yahoo has not published the next 5-minute bar. The explanation under the status says which. |
 | `No module named streamlit` (or pytest) | The command ran outside the project folder. `cd` into the project folder first, or double-click `run_app.bat`. |
 | Windows Firewall asks whether to allow Python | Choose Cancel (the app still works on this laptop), or start it with `--server.address localhost`. |
 

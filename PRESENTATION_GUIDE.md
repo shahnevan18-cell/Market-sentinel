@@ -62,9 +62,12 @@ code. The hypothesis scores come from a fixed rubric, so a conclusion can be che
 orchestrator also owns the safety rules: an agent cannot skip a required check, overspend its tool budget or call a
 tool that does not exist, and a failed model step is reported as failed.
 
-Without a key, a fixed protocol calls the same tools in a set order and writes the narrative from templates. The app
-labels this "Rule-based protocol (no LLM in use)". Do not present that mode as AI reasoning. Present it as the honest
-fallback, and explain what changes when a model is connected.
+Without a key, or when you choose it in the sidebar, a fixed protocol calls the same tools in a set order and writes
+the narrative from templates. Every report names the engine that actually ran: "Model-directed", "Rule-based fallback
+after a provider error" (with the reason, for example the daily quota and when it resets), "Rule-based fallback: the
+model's output could not be used", "Rule-based protocol, selected in the sidebar" or "Rule-based protocol: no LLM
+credentials configured". A key being present never makes a run look model-directed by itself. Do not present a
+rule-based run as AI reasoning. Present it as the honest fallback, and explain what changes when a model is connected.
 
 Status to state if asked: on 20 October the India version ran with Google's gemini-3.5-flash on the free tier.
 On the synthetic Saffron Bank case both agents finished with the model and nothing fell back to rules. The Market
@@ -77,11 +80,14 @@ evening with a key from a fresh Google project, the live HCL case passed in full
 model on real NSE data, and the grounding check caught one invented figure, which the model then removed. Both passing
 runs are in Investigation history and in `docs/llm_check_result.md` (demo) and `docs/llm_check_live_result.md` (live).
 
-LLM quota on the day: the laptop's `.env` now holds a key from a fresh Google project, which had used one live run
-by the evening of 20 October. Free-tier quotas are per project and reset at midnight Pacific time (12:30 IST). Avoid
-extra test runs before the presentation. If a request is refused, open the saved live run (HCLTECH-NS-2026-10-13,
-20 Oct, 21:13 IST) from Investigation history and show its Model decisions; it works offline. Any new investigation
-still completes with the rule-based engine and a red banner that says why.
+LLM quota on the day: free-tier quotas belong to the Google project, not the key, and reset at midnight US Pacific
+time, which is 12:30 IST. One investigation uses about 9 to 12 model requests and the free allowance seen on 20
+October was about 20 a day, so plan on one or two Gemini runs per project per day. If the laptop's project ran
+several investigations the night before, its allowance is probably used up until 12:30 IST. Before presenting, press
+Test connection in the sidebar (one request). "Connected" means Gemini is ready. A daily-quota message means: use a
+key from another Google project, or select Rule-based protocol and open the saved live run (HCLTECH-NS-2026-10-13,
+20 Oct, 21:13 IST) from Investigation history to show its Model decisions; it works offline. Any new investigation
+still completes, and its engine line says it ran on rules and why.
 
 ## The five-minute demonstration
 
@@ -96,6 +102,7 @@ Timing on the day: the presentation is on Wednesday 21 October, an NSE trading d
 | Time | Page | Do | Say |
 |---|---|---|---|
 | 0:00 | Market overview | Point to the source pill, the NIFTY 50 strip and the Sentinel grid, then the legend | "Twenty-five NIFTY 50 stocks, rupee prices, NSE sessions in IST. Each coloured cell is an alert, coloured by its priority band, slate to red, with the direction and the score on it. Quiet days stay neutral, and a cross means no data. Priority means urgency of review, not a good or bad stock." |
+| (optional, 20 s) | Market overview, Intraday watch (only between 09:20 and 15:40 IST) | Press Refresh now. Point to Status, Latest complete bar and the table | "Five-minute bars from Yahoo, unofficial and possibly delayed, each compared with the same time of day over the previous 40 sessions. It is separate from the daily alerts and never starts an investigation or calls the model." |
 | 0:40 | Anomaly monitor | Filter Severity to Critical and High, pick the alert in Selected alert. Read the panel's plain-English reason, then the score breakdown | "Three tests: the raw move, the part the NIFTY 50 does not explain, and volume. The score ranks attention; it is not a probability." |
 | 1:20 | Investigation workspace | The alert is preselected. Turn on Presentation pacing, press Run investigation. When it ends, read the Summary tab top to bottom: what happened, the explanation and its status, the one next action | "Each line on the right is a step that actually ran. The summary separates three things: what we observed, how strong the explanation is (verified, provisional or unresolved) and the single next check an analyst should make." |
 | 2:20 | Same page, Evidence tab | Show the comparison bars, the news table (published time in IST, timing, relevance, links) and the official disclosures list | "Only items between the previous 15:30 close and the event-day close can explain the move. NSE's terms forbid automated scraping, so exchange announcements are linked for a manual check, never scraped." |
@@ -111,9 +118,11 @@ unexplained fall (28 August), the oil, gas and power rally (3 August) and the ma
 
 If something fails, say what failed and switch. If live data does not load, the app says so and never substitutes
 synthetic prices; switch to Demonstration data. If news sources fail, the report says "News evidence unavailable" and
-caps the news-dependent scores, which is the designed behaviour. If the LLM fails or hits the rate limit, a red banner
-says the AI step did not complete and the rule-based output is labelled as a fallback. You can also open a saved run
-from Investigation history at the bottom of the workspace; it works offline.
+caps the news-dependent scores, which is the designed behaviour. If Gemini fails, the engine line says "Rule-based
+fallback after a provider error" and a red banner gives the reason (for a daily quota, the time it resets); the
+findings come from the rule-based protocol. You can also open a saved run from Investigation history at the bottom of
+the workspace; it works offline. If intraday bars do not arrive, the Intraday watch says Unavailable or Stale with the
+reason; the daily analysis is not affected.
 
 ## Pre-presentation checklist
 
@@ -121,20 +130,26 @@ The evening before, on the presentation laptop, in PowerShell:
 
 ```powershell
 cd "C:\Users\Navin shah\Documents\market_sentinel"
-.\.venv\Scripts\python.exe -m pytest -q                  # expect 227 passed
+.\.venv\Scripts\python.exe -m pytest -q                  # expect 297 passed
 .\.venv\Scripts\python.exe scripts\validate_symbols.py   # expect 30 symbols, no FAIL
 .\.venv\Scripts\python.exe scripts\smoke_test.py --no-llm
+.\.venv\Scripts\python.exe scripts\intraday_check.py     # which intraday intervals Yahoo returns
 ```
 
-For the LLM, make sure `.env` has `LLM_MODEL=gemini-3.5-flash`, then:
+`intraday_check.py` asks Yahoo for NIFTY 50 and four stocks at 1, 2, 5, 15, 30 and 60-minute intervals and writes
+`docs\intraday_check_result.md`. Outside market hours it reports the last session's bars.
+
+For the LLM, check the key and the quota with one request first:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\llm_check.py          # synthetic India data; needs only the LLM provider
+.\.venv\Scripts\python.exe scripts\llm_check.py --probe  # one request: key, model and tool calling
+.\.venv\Scripts\python.exe scripts\llm_check.py          # full run on synthetic India data (9 to 12 requests)
 .\.venv\Scripts\python.exe scripts\llm_check.py --live   # the same on live NSE data
 ```
 
-Each prints every model turn and ends with PASS, PARTIAL or FAIL. The run is saved to history and written to
-`docs\llm_check_result.md`. The free tier allows only a few requests per minute, so leave a minute between runs.
+The full checks print every model turn and end with PASS, PARTIAL or FAIL. Each run is saved to history and written
+to `docs\llm_check_result.md`. They spend most of a free project's daily allowance, so skip them on the morning of the
+presentation if the probe says Connected.
 
 Then double-click `run_app.bat` once and close its window when the app has opened. The first start through the
 launcher checks the installed packages against `requirements.txt`, which takes a minute; later starts skip it.
@@ -144,7 +159,10 @@ Thirty minutes before:
 - Start the app by double-clicking `run_app.bat`. Leave the black window open.
 - Let live data load once. It is then cached for six hours, so the venue's network matters less.
 - Check the header: "Latest complete session" should be 19 October before 16:15 IST on the 21st.
-- Check the sidebar under Reasoning engine: it says whether an LLM is configured.
+- Check the sidebar under Reasoning engine. It should read "Configured: gemini-3.5-flash via Google Gemini". Press
+  Test connection once (one request).
+- If you present during market hours, press Refresh now under Intraday watch on the Market overview once, and check
+  that a complete bar from the last few minutes appears.
 - Run one investigation of the preselected live alert so the data and news are warm, and note which stock it is.
 - Open the saved Saffron Bank LLM run once from Investigation history so you know where it is.
 - Keep the laptop on mains power, turn off sleep, close other heavy apps.
@@ -180,6 +198,19 @@ All rules are in `config/market.py`: Asia/Kolkata time, the 09:15 to 15:30 norma
 after 16:15 IST (the end of trade modifications), and the NSE holiday circulars for 2024 to 2026. Weekend special
 sessions such as Muhurat trading are kept, not deleted. A test caught that the US version's New York time conversion
 moved every Indian bar to the previous day.
+
+Is Gemini running on the public link?
+Only when its key is in the Streamlit secrets. The sidebar says which: "Configured: gemini-3.5-flash via Google
+Gemini ... key read from GEMINI_API_KEY", or "No LLM credentials are configured". Test connection sends one request
+and reports the result. Each report also states which engine actually ran, so a configured key alone never makes a
+run look model-directed.
+
+Is the intraday data real-time?
+No. The 5-minute bars come from Yahoo through yfinance, unofficial and possibly delayed, and are requested only while
+someone has the Market overview open (a timed refresh every 5, 10 or 15 minutes, or Refresh now). Each bar is compared
+with the same time of day over the previous 40 sessions, because volume and volatility are naturally high after the
+open and before the close. With fewer than 15 earlier sessions a stock is shown for display only. Intraday flags are
+separate from the daily alerts, change no score and start no investigation.
 
 How do you know the LLM really chose the tools?
 The Model decisions view lists each turn's requested tools, taken from the audit log written as the calls happened. A
@@ -231,11 +262,14 @@ was wrongly flagged as an invented figure, and the free tier's rate limit needed
 conversion found that bar dates shifted by a day under New York time, that the link-only disclosure entry could hide
 a failed news search, and that Indian digit grouping was split into two numbers by the grounding check. Each has a
 regression test. The first live check on the laptop then found that Yahoo had only three sessions of history for
-NIFTY Energy, FMCG and Auto, so those indices were removed and their groups are compared with peers only.
+NIFTY Energy, FMCG and Auto, so those indices were removed and their groups are compared with peers only. The first
+public deployment showed the rule-based engine because the key existed only in the laptop's `.env`; the app now reads
+GEMINI_API_KEY from the hosting secrets, names any missing or unusable setting, and labels each run with the engine
+that actually ran.
 
 Is it deployed?
-Only say yes if you have opened the public URL and seen it work. `docs/deployment.md` has the exact steps for GitHub
-and Streamlit Community Cloud.
+Yes, on Streamlit Community Cloud. Say that Gemini runs there only if its sidebar reads "Configured" and Test
+connection succeeds on the day. `docs/deployment.md` has the steps for updating it.
 
 ## Limitations and ethics
 
@@ -245,6 +279,7 @@ and Streamlit Community Cloud.
 - Exchange announcements are link-only, so a filing can explain a move the app calls unexplained.
 - Headlines are judged from titles, publishers and times. Article text is not read.
 - Yahoo data through yfinance is unofficial, can be delayed or throttled, and is for personal and educational use.
+- Intraday bars are collected only while someone has the Market overview open; there is no background collector.
 - Beta from 120 sessions can drift, peer groups are small, and seven of the ten groups have no sector index.
 - Historical VaR and volatility describe the past and understate tail risk in stressed markets.
 - The illustrative portfolio is hypothetical. Stress results are assumptions, never observations.

@@ -10,9 +10,17 @@ Data source switches between live NSE market data (25 NIFTY 50 shares, the NIFTY
 SENSEX, through Yahoo Finance) and the synthetic demonstration set of fictional India-themed companies. In live mode,
 Refresh market data ignores the cache and downloads again. When a live load fails, the failure is shown again for two minutes
 instead of retrying on every click; Refresh market data retries at once. Alert thresholds change the baseline window and the three z-score
-thresholds; every page recalculates immediately and Reset to defaults restores 60 sessions and 3.0. The reasoning
-engine panel shows whether an LLM key was found and lets you switch the LLM off for a run. Reset session clears the
-selected alert and the open investigation without deleting cached data or saved reports.
+thresholds; every page recalculates immediately and Reset to defaults restores 60 sessions and 3.0. Reset session
+clears the selected alert and the open investigation without deleting cached data or saved reports.
+
+Reasoning engine. When a key is configured, choose "Gemini (model-directed)" or "Rule-based protocol" for the next
+investigation; the caption names the model and the setting the key was read from (never the key). Without a key, or
+with settings that cannot be used, the caption says which and what to set. If the deployment has a passcode
+(`MS_LLM_PASSCODE`), enter it before the model can be called; until then investigations use the rule-based protocol
+and say why. Test connection sends one small request (one request of the daily quota) and reports either "Connected"
+with the response time or the reason it failed, such as a rejected key or a used-up daily quota with its reset time in
+IST; the provider's own message, with any key removed, is folded underneath. Engine diagnostics lists the names of the
+settings the app found, never their values.
 
 ## Market overview
 
@@ -21,6 +29,18 @@ volatility, the share of watchlist stocks that rose, and alert counts. The pills
 the latest complete NSE session and how long ago the data was retrieved. Amber warnings appear when data is stale or
 a symbol failed. A blue note appears when the latest bar was fetched before 16:15 IST (the day is not final yet) or
 when today is an NSE trading holiday.
+
+Intraday watch (live data only) shows 5-minute bars for the NIFTY 50 and the 25 stocks. Nothing is requested when the
+page opens: press Refresh now, or turn on Auto-refresh and choose every 5, 10 or 15 minutes. The status line gives the
+status (Fresh, Waiting for new data, Cached, Stale or Unavailable), the time of the last request, the latest complete
+bar in IST, the interval, the source, and whether this view sent a request; the sentence under it explains the status,
+for example that the market is closed for a holiday and when the next session opens. Stocks whose latest complete bar
+is unusual for its time of day are listed with the reason, and earlier unusual bars of the session are named. The
+chart shows the NIFTY 50's 5-minute closes for the session, and the table lists every symbol's latest bar, its z-scores
+against the same time of day, volume against the usual for that time, and the number of earlier sessions behind each
+comparison, most unusual first. "n/a" means the value does not exist (an index has no volume on Yahoo, or a stock
+has too little history for that time of day); it is never shown as zero. The section changes no daily alert or score
+and starts no investigation. It refreshes only while the page is open.
 
 The sentinel grid is the main picture: one row per stock, one column per NSE session. Choose the period (1 week,
 1 month, 3 months or a custom range of sessions), what the colour shows and the row order; Reset view returns to one
@@ -62,9 +82,12 @@ model turns, validations and warnings) with its result. Presentation pacing adds
 audience can follow; results are identical.
 
 The verdict box shows the explanation, its status (Verified, Provisional or Unresolved) and the recommended next
-action. The strip under it names the engine
-that produced the run: "LLM-directed" with the model turns and the number of tool calls the model chose, or
-"Rule-based protocol" when no LLM was used or the LLM step failed. The tabs below it, in reading order:
+action. Before the run, a caption says which engine the run will use and why. After it, the strip under the verdict
+names what actually happened: "Model-directed" with the model, its turns and the tool calls it chose; "Partly
+model-directed"; "Rule-based fallback after a provider error" or "... the model's output could not be used", with a
+red note giving the reason (the provider's own message, keys removed, is in a collapsed section); or "Rule-based
+protocol" with the reason no model ran (selected in the sidebar, no credentials, settings unusable, switched off, or
+locked by passcode). The tabs below it, in reading order:
 
 | Tab | What it shows |
 |---|---|

@@ -26,6 +26,8 @@ The priority score ranks alerts for attention. It is not a measure of importance
 - NIFTY sector indices are weighted by free-float market capitalisation and include the stock being studied.
 - Corporate actions are handled through the adjusted close. A bonus issue, split or demerger the provider does not adjust appears as a large one-day move and is flagged for manual checking, not corrected.
 - The NSE holiday table covers 2024 to 2026. Later years need the new circular; until then every weekday is treated as a possible session and the NIFTY 50's own dates decide which sessions exist.
+- Intraday 5-minute bars come from the same unofficial source and are not a real-time exchange feed. Yahoo does not promise when a bar appears, so the newest bar can trail the clock; the status line says so when it happens. Yahoo keeps 5-minute bars for about 60 days, which limits the time-of-day baselines to roughly 40 sessions.
+- Intraday refresh runs only while someone has the Market overview open. There is no background collector: when nobody has the app open, nothing is recorded, and the bars held in memory disappear when the server restarts or the hosted app sleeps.
 
 ## Statistical limits
 
@@ -34,6 +36,7 @@ The priority score ranks alerts for attention. It is not a measure of importance
 - With 25 stocks and roughly 245 sessions a year, a 3-sigma rule produces false alarms by chance alone, especially because returns have fat tails. The threshold sensitivity tab shows the trade-off.
 - Historical VaR and volatility describe the past. They understate risk when markets become more volatile.
 - The replay is descriptive on live data. There is no ground-truth label for a correct alert, so no accuracy figure is claimed for NSE data. The recall check in demonstration mode measures the detector against planted shocks only.
+- Intraday flags compare one bar with the same bar of the day in about 40 earlier sessions. Twenty-six symbols with 75 bars a session make about 2,000 comparisons a day, so even the stricter cut-off of |z| 4 will flag some chance extremes, and intraday returns have fatter tails than a normal distribution. The intraday thresholds were set from this reasoning and checked on synthetic data in the tests; they have not been calibrated on a long history of NSE bars.
 
 ## LLM limits
 
@@ -42,6 +45,8 @@ The priority score ranks alerts for attention. It is not a measure of importance
 - Free tiers limit requests. On HTTP 429 the client waits as long as the provider asks, up to 65 seconds and twice; a longer wait or a used-up daily quota ends the model step, and the report shows the labelled rule-based output with the reason.
 - On 20 October 2026, gemini-3.5-flash completed both agents itself on the India demo data (PASS). On live NSE data the first run stopped at the free tier's daily quota, and the app reported it and fell back to the labelled rule-based output; a rerun with a key from a fresh Google project passed in full. Free-tier quotas are counted per Google project and reset at midnight Pacific time (12:30 IST).
 - Without an LLM key, the investigation is a fixed protocol over the same tools. It is labelled as such and should not be described as AI reasoning.
+- A key in the settings is not proof that the model ran. Each report records its engine mode from what happened (model-directed, partly model-directed, fallback after a provider error, fallback after unusable model output, or rule-based with the reason), and only the first should be described as AI-directed.
+- On a public deployment anyone with the link can spend the key's quota. `MS_LLM_PASSCODE` locks the model behind a passcode; without it, use a key with a spending limit.
 
 ## Responsible use
 

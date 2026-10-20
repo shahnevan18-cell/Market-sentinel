@@ -228,7 +228,7 @@ def test_llm_check_refuses_to_run_without_a_key(monkeypatch, capsys):
     module = _llm_check_module()
     monkeypatch.setattr("sys.argv", ["llm_check.py"])
     assert module.main() == 2
-    assert "No LLM is configured" in capsys.readouterr().out
+    assert "No LLM credentials are configured" in capsys.readouterr().out
 
 
 def test_llm_check_prints_the_models_turns(demo_ds, demo_monitor, settings):

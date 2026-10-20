@@ -1,6 +1,7 @@
 # Test report (India version)
 
-Recorded on 19 and 20 October 2026; the conversion to Indian equity markets was built and tested on 20 October.
+Recorded on 19 and 20 October 2026; the conversion to Indian equity markets was built and tested on 20 October, and
+the hosted-Gemini fixes and the intraday watch on the night of 20 to 21 October.
 Every result below comes from a run that actually happened. Anything that could not be run, or still has to be run
 on the team laptop, is listed as such with the reason.
 
@@ -22,29 +23,34 @@ python scripts/make_share_zip.py <output.zip>
 # The app in demonstration and live mode, driven in headless Chromium
 streamlit run app.py --server.port 8611 --server.headless true
 
+# The engine sidebar (fake key, no key, passcode) and the intraday panel (synthetic bars, accelerated clock),
+# driven in headless Chromium with Playwright
+streamlit run app.py --server.port 8632 --server.headless true
+
 # On the team laptop, Windows 11 (results below)
 python -m pytest -q
 python scripts/validate_symbols.py
 python scripts/smoke_test.py --no-llm
-python scripts/llm_check.py            # and --live
+python scripts/llm_check.py            # and --live, and --probe for a one-request check
+python scripts/intraday_check.py       # intraday intervals from Yahoo; still to be run
 ```
 
 ## Environments
 
 | Run | Python | streamlit | pandas | numpy | plotly | yfinance | pydantic | Result |
 |---|---|---|---|---|---|---|---|---|
-| Latest versions | 3.13.16 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed, 0 failed, 0 skipped (66 s) |
-| Minimum supported versions | 3.13.16 | 1.55.0 | 2.2.3 | 2.1.3 | 5.24.1 | 1.0 | 2.8.2 | 227 passed (52 s) |
-| Python 3.15 | 3.15.0 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed (65 s) |
-| Python 3.12 | 3.12.15 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed (65 s) |
-| Python 3.11 | 3.11.17 | 1.66.0 | 3.0.6 | 2.4.6 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed (65 s) |
-| Fresh environment from requirements.txt only (Community Cloud default Python) | 3.12.3 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed (69 s); `pip check`: no broken requirements |
-| Unzipped copy of the shared zip (101 files, 330 KB; no API key inside) | 3.13.16 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 227 passed (66 s) |
+| Latest versions | 3.13.16 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed, 0 failed, 0 skipped (93 s) |
+| Minimum supported versions | 3.13.16 | 1.55.0 | 2.2.3 | 2.1.3 | 5.24.1 | 1.0 | 2.8.2 | 297 passed (83 s) |
+| Python 3.15 | 3.15.0 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed (93 s) |
+| Python 3.12 | 3.12.15 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed (94 s) |
+| Python 3.11 | 3.11.17 | 1.66.0 | 3.0.6 | 2.4.6 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed (96 s) |
+| Fresh environment from requirements.txt only (Community Cloud default Python) | 3.12.3 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed (97 s); `pip check`: no broken requirements |
+| Unzipped copy of the shared zip (109 files, 387 KB; no API key inside) | 3.13.16 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 297 passed (94 s) |
 | Team laptop, Windows 11, 20 Oct | 3.15.0 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 184 passed, 1 failed (183 s). The laptop was one test file behind (185 tests); the failure was the launcher port test, a Windows problem in the test itself (see the defects table) |
 | Team laptop after the sector-index and port-test fixes, 20 Oct 16:24 IST | 3.15.0 | 1.66.0 | 3.0.6 | 2.5.4 | 7.1.0 | 1.7.0 | 2.14.1 | 186 passed, 0 failed (114 s). The 187th test, for the busy-provider wording below, was added after this run |
 
-Sandbox runs were on Linux; the times are from the last run in each environment, after the fixes of 20 October
-evening. The suite uses deterministic synthetic fixtures only, with fictional company names in
+Sandbox runs were on Linux; the times are from the last run in each environment, on the night of 20 to 21 October,
+with two suites running side by side. The suite uses deterministic synthetic fixtures only, with fictional company names in
 every news fixture. It never reads the developer's `.env`, never calls a real LLM or a real data provider, and
 writes its cache and history to a temporary folder.
 
@@ -66,8 +72,10 @@ writes its cache and history to a temporary folder.
 | test_guidance.py | 17 | 17 | Evidence levels A, B and C; the unresolved sector-against-company case and its discriminating checks; no repeated completed checks; the provisional earnings headline; categories from headline words; no catalyst; failed news search; validation first for unreliable data; routine data notes kept as limitations; corroboration over a single earlier mismatch; social posts and forecast pages excluded; the rating-change action; wording for every category; figures only from the record; no trading advice; level A only for a retrieved announcement, audited; different actions for different demo cases; saved records rebuilt; the Summary tab's A to E order |
 | test_sentinel_grid.py | 7 | 7 | Priority colour equals each alert's score and quiet days are neutral, legend from the configured thresholds, missing sessions marked with a cross, rows ordered by priority, intensity view labelled as a different measure, direction arrows and click ids on alert cells, and the overview controls (colour, order, Reset view, alert picker) |
 | test_packaging.py | 4 | 4 | The shared zip leaves out `.env`, deployment secrets, `.venv`, caches and saved runs and keeps the Mac launcher executable; the real project zip contains the launchers; the launcher reinstalls packages only when requirements.txt changes; a busy port moves the app to the next one |
+| test_engine_modes.py | 42 | 42 | Gemini enabled by GEMINI_API_KEY alone, GOOGLE_API_KEY, LLM_API_KEY, LLM_PROVIDER=gemini and the laptop's long form; unusable settings named instead of ignored (no key, no model, unknown provider, switched off, no credentials, a Claude model with a Gemini key); hosted secrets copied, lifted from lower case and tables, updated when edited, and reported by name only; an unreadable secrets file reported without its content; the connection probe makes one real-format request, reads a tool call, and classifies a rejected key, a daily quota, a busy provider and an unknown model without showing the key; timeouts; the daily-quota reset at midnight Pacific shown in IST; the five engine states (model-directed, mixed, provider fallback with the reason, model output unusable, rule-based with the reason it ran); a failed first call leads to one rule-based run of each check, none forced; invalid tool arguments go back to the model; a failing tool is reported and the model continues; no key in the record, audit trail or report; the sidebar's engine choice, passcode lock and connection test; `llm_check.py --probe` |
+| test_intraday.py | 28 | 28 | 5-minute bars read in IST, off-grid, out-of-session and duplicate rows dropped, never repaired; the bar still forming flagged, missing volume kept missing; the market clock on a holiday evening, a weekend and before the open; the newest complete bar expected at each time; Fresh, Waiting and closed-market explanations; peek never requests; the first refresh loads 60 days once, later refreshes only the last 5 days; a manual refresh bypasses the cache but not a request seconds old; a failure keeps the last good bars with their age; a first failure is Unavailable; one failing symbol keeps its earlier bars and says so; no automatic requests while the market is closed; two sessions refreshing together cause one request; history requested again on a new day; a stock-specific jump flagged against the same time of day; volume judged against its own time of day; a market-wide move not flagged as relative; short history display only; a forming or missing bar never used or filled; the intraday code never imports the LLM; the panel's controls, status and manual refresh; no simulated intraday in demo mode; the table shows n/a, never zero or None; `intraday_check.py` reports bars and failures |
 | test_agent_robustness.py | 21 | 21 | Long tool results shortened without breaking JSON; a failing display summary does not stop a tool; the news search shows every group, company announcements first, with IST times and the stated event date; list_news_items pages and enforces its schema; grounding accepts rupee, crore and dollar figures quoted from sources, reads Indian digit grouping and written dates, and ignores clock times in IST and UTC; a malformed provider response falls back to rules; a partial fallback is named; OpenAI-compatible calls without ids still match their results; the decision trace shows an adaptive model's own choices; the record says whether it was saved; the final-bar time is shown in IST on any server; HTTP 429 waits as the provider asks, fails at once on a daily quota or an over-long wait, and respects Retry-After; a busy provider (HTTP 503) is logged as busy, with the wait marked as the app's own when the provider gives none; prompts and tools carry the Indian market facts; the LLM check refuses without a key and prints the model's turns |
-| Total | 227 | 227 | |
+| Total | 297 | 297 | |
 
 ## Coverage of the required test areas (India brief, section 9)
 
@@ -85,6 +93,8 @@ writes its cache and history to a temporary folder.
 | Agent tool calls, structured outputs and fallback | test_llm_validation.py, test_agent_robustness.py, test_prompts_and_tools_carry_indian_market_facts |
 | Synthetic scenarios | test_designed_scenarios_reach_the_intended_explanation (6 cases), test_replay_offers_the_designed_scenarios_immediately, test_demo_universe_is_fictional_and_labelled, test_demo_calendar_follows_nse_trading_days |
 | Page rendering, start-up and deployment configuration | test_app_pages.py, test_packaging.py, test_hosted_secrets_configure_the_app_and_the_key_is_never_shown, the fresh-environment and unzipped-copy runs above |
+| Gemini configuration, engine modes and fallbacks (hosted-Gemini brief) | test_engine_modes.py; see the next section for each required path |
+| Intraday bars, cache policies and time-of-day detection (hosted-Gemini brief) | test_intraday.py |
 
 ## India conversion: defects found and fixed
 
@@ -133,6 +143,93 @@ workspace Summary of a fresh Saffron Bank run (verified, align-timing action); a
 record reopened from Investigation history, which showed the unresolved case with its checks and the NSE links. Live
 data cannot be reached from the sandbox, so the live path was checked through the saved live records and the labelled
 test prices; the team laptop rerun is listed below.
+
+## Gemini on the hosted app and the intraday watch (night of 20 to 21 October)
+
+### What the public app showed, and why
+
+Opened from the laptop's browser at about 22:20 IST on 20 October, the public app loaded live data (30 of 30
+symbols, latest session 19 October) and its sidebar read: "No LLM key found, so investigations use the rule-based
+engine. Add ANTHROPIC_API_KEY (or LLM_API_KEY) ...". The app's secrets cannot be read from here. Two explanations
+fit that screen: no key was in the secrets (the key lived only in the laptop's `.env`, which is git-ignored and never
+uploaded), or a key was stored under a name the old code ignored, such as `GEMINI_API_KEY`. Either way the hosted app
+never called Gemini. Tracing the path from secrets to the report found these defects:
+
+| Defect | Effect | Fix | Tests |
+|---|---|---|---|
+| Only `ANTHROPIC_API_KEY`, or `LLM_API_KEY` with `LLM_PROVIDER`, `LLM_BASE_URL` and `LLM_MODEL`, enabled a model | A Gemini key under its natural name (`GEMINI_API_KEY` or `GOOGLE_API_KEY`) left the app on rules | `GEMINI_API_KEY` alone enables Gemini through Google's OpenAI-compatible endpoint with gemini-3.5-flash; the laptop's long form still works | test_gemini_is_enabled_by_any_supported_setup (5 cases) |
+| `LLM_PROVIDER=gemini` fell through to OpenAI's URL with no model | The LLM was disabled without saying why | Gemini is a provider of its own with its defaults; a missing key or model is reported | test_unusable_settings_are_explained_not_silently_ignored (6 cases) |
+| Secrets were copied only when the variable did not exist, nested tables and lower-case names were skipped, and every error was swallowed | An edited secret needed a full restart; a key inside `[gemini]` was ignored; a broken secrets box looked like "no key" | Values this app copied are updated, app settings are lifted from tables and lower case, an unreadable secrets box is reported without its content, and Engine diagnostics lists the names found | test_secrets_are_copied_lifted_and_updated, test_unreadable_secrets_are_reported_without_their_content |
+| Every problem was shown as "No LLM key found ... Add ANTHROPIC_API_KEY (or LLM_API_KEY)" | The message pointed at the wrong variable for a Gemini user | The sidebar states the actual situation and what to set | test_sidebar_without_credentials_says_so |
+| The report's engine label came from what was configured | A provider failure, a model failure and a deliberate rule-based choice were hard to tell apart | The engine mode comes from what happened in the run (next table), with an "Engine selection" audit entry naming the model, endpoint host and key variable, and each model turn recording the model, the tools it asked for and the token counts | test_model_directed_run_is_labelled_with_model_and_key_source, test_engine_strip_names_each_mode, test_mixed_run_is_named |
+| Provider error text could carry a key (some messages echo the request) | A key could reach the report, the audit trail or the screen | Errors are redacted when created and when stored; the probe and diagnostics show names only | test_probe_classifies_provider_errors_and_hides_the_key, the key check in test_provider_errors_fall_back_and_say_why |
+| After a failed first model call the orchestrator ran the required checks as "skipped by the investigator", then the rule-based fallback ran them again | Duplicate tool calls and a misleading warning in every provider-failure report (seen in the browser check below) | The fallback runs first; the orchestrator forces only what is still missing | test_fallback_runs_each_required_check_once_and_forces_none |
+| A `LLM_MODEL=claude-...` line left in `.env` would be sent to Google with a Gemini key | A model-not-found failure at run time | Reported as a configuration problem before any request | the sixth case of test_unusable_settings_are_explained_not_silently_ignored |
+| No cheap way to check a key | Checking meant a full investigation (9 to 12 requests) | Test connection in the sidebar and `llm_check.py --probe`: one request that must come back as a tool call | test_probe_reports_a_real_tool_call, test_sidebar_connection_test_reports_a_quota_failure_plainly, test_llm_check_probe_option |
+| A public link could spend the quota | Anyone with the link could use up the day's requests before a demo | Optional `MS_LLM_PASSCODE`, compared in constant time; until it is entered the run is rule-based and says so | test_sidebar_engine_selector_lock_and_rules_choice |
+
+### The five engine states and the required failure paths
+
+| State in the report | When |
+|---|---|
+| Model-directed | Both agents completed with the model |
+| Partly model-directed | One agent completed with the model and the other fell back, with the reason |
+| Rule-based fallback after a provider error | The model was called and the provider failed: rejected key, daily quota (with the reset time in IST), rate limit, unknown model, busy provider, timeout, network |
+| Rule-based fallback: the model's output could not be used | The model answered but stopped calling tools or submitted output that failed validation |
+| Rule-based protocol, with the reason | Selected in the sidebar, no credentials configured, settings unusable, switched off, or locked by the passcode |
+
+| Required path | Evidence | Result |
+|---|---|---|
+| Real Gemini call with credentials | Laptop, 20 Oct 21:13 IST, `llm_check.py --live` on the build before these changes | PASS (table "Real LLM runs" below). On this build, laptop, 21 Oct 01:46 IST: `llm_check.py --probe` PASS, gemini-3.5-flash answered with a tool call in 2.4 s (1 request, key read from LLM_API_KEY). A full investigation on this build is still to be run |
+| Missing key | test_sidebar_without_credentials_says_so, test_rule_based_runs_say_why_no_model_ran, browser check | Passed |
+| Invalid key | test_probe_classifies_provider_errors_and_hides_the_key (HTTP 400 and 401), test_provider_errors_fall_back_and_say_why | Passed |
+| Daily quota | the same two tests (HTTP 429 per-day), test_quota_reset_is_midnight_pacific_shown_in_ist, test_sidebar_connection_test_reports_a_quota_failure_plainly | Passed |
+| Timeout | test_probe_timeout_and_unconfigured, test_provider_errors_fall_back_and_say_why (read timeout) | Passed |
+| Provider unavailable | HTTP 503 cases; browser check in which the sandbox's proxy really refused the connection to Google | Passed |
+| Invalid tool arguments | test_invalid_tool_arguments_go_back_to_the_model | Passed: rejected by the schema, returned to the model, which recovered |
+| Invalid model output | test_invalid_model_output_is_a_model_failure_not_a_provider_error, test_model_that_stops_using_tools_falls_back | Passed |
+| Tool failure | test_a_failing_tool_is_reported_and_the_model_continues | Passed |
+| Rule-based chosen deliberately | test_rule_based_runs_say_why_no_model_ran, the sidebar AppTest, browser check | Passed |
+
+The failure-path tests drive the real orchestrator and agent loop with a scripted stand-in for the provider. No test
+pushes a successful investigation through a mocked model and presents it as a real run.
+
+### Intraday watch
+
+The daily path was audited first: daily bars are cached on disk for six hours, kept in memory per server process, and
+the monitor result is cached per dataset. The six-hour figure is a cache life, not a schedule: nothing refreshes on
+its own. The intraday watch is a separate path (`providers/intraday.py`, `analytics/intraday.py`,
+`ui/intraday_panel.py`) and the daily path is unchanged.
+
+| Policy | Behaviour |
+|---|---|
+| Opening the page | No request ("peek"); shows what the server already holds, or Unavailable |
+| Auto-refresh (5, 10 or 15 minutes, a Streamlit timed fragment) | Requests only when the held bars are older than one bar interval less 20 seconds, and never while the market is closed and the last session is complete |
+| Refresh now | Bypasses that cache; a request that finished in the last 15 seconds is reused instead of repeated |
+| Several open sessions | One lock and one store per server process, so simultaneous refreshes cause one request |
+| History for the baselines | 60 days of 5-minute bars once per day; later refreshes ask for the last 5 days only |
+| A failed refresh | Keeps the last good bars and reports Stale with their age; a symbol that fails alone keeps its earlier bars and is named |
+| LLM | Never called; a test checks that the intraday modules do not import it |
+
+The app was not able to fetch real intraday bars from the sandbox (Yahoo is blocked there). The panel was therefore
+driven in headless Chromium inside a sandbox-only harness that serves the real panel and store with labelled
+synthetic bars and a clock running 20 times faster: Unavailable on opening, Fresh after Refresh now, Cached within the
+bar life, then new requests each time the bars expired (four request times in 48 seconds at a 15-second test
+interval). The table showed "n/a" for values that do not exist (an index has no volume) and no negative zero.
+
+### Browser checks of the engine states
+
+The real app was run in demonstration mode, driven in headless Chromium. In the run with a fake Gemini key, the
+sandbox's proxy refused every connection to Google, so the failures below are real network failures, not simulations.
+
+| Set-up | What the page showed |
+|---|---|
+| Fake `GEMINI_API_KEY` | Sidebar: "Gemini (model-directed)" and "Rule-based protocol", "Configured: gemini-3.5-flash via Google Gemini (OpenAI-compatible endpoint), key read from GEMINI_API_KEY." Test connection: "Connection test failed ... The provider could not be reached (network error)." The run: "Rule-based fallback after a provider error", "model called: gemini-3.5-flash", and a red banner with the reason |
+| Same, Rule-based protocol chosen | Preview "rule-based protocol, because selected in the sidebar"; report "Rule-based protocol, selected in the sidebar" |
+| No key | Sidebar "No LLM credentials are configured ... set GEMINI_API_KEY in .env, or in the app's secrets when hosted"; report "Rule-based protocol: no LLM credentials configured" |
+| Fake key and `MS_LLM_PASSCODE` | Sidebar asks for the passcode; report "Rule-based protocol: model locked by passcode" |
+
+The fake key never appeared in any page's HTML.
 
 ## US assumptions removed or retained
 
@@ -204,10 +301,20 @@ explanations, and one headline cannot decide between company news and unexplaine
 
 ## Not tested or still unverified
 
-- The 41 tests added on the evening of 20 October have run in the sandbox environments only until the laptop reruns the suite (the laptop's last run passed 186 of 186 before them).
-- The deployed Streamlit app is updated only after the new files are pushed to GitHub; until then it still runs the earlier build.
-- Live data during NSE market hours. The laptop checks ran on a holiday, so a bar still in progress (before 16:15 IST) has been tested only with labelled test data.
-- How Yahoo treats each corporate action of the watchlist companies (bonus issues and demergers). The app flags moves of 25% or more but cannot see the provider's adjustment policy.
-- The 2024 holiday list was read from a broker's copy of the NSE circular, because the official PDF could not be retrieved.
-- `run_app.bat` on Windows has not been observed starting from scratch; the app on the laptop has been started from PowerShell.
-- Deployment to Streamlit Community Cloud, and live data from Community Cloud's servers.
+- A full real Gemini investigation on this build. The connection probe passed on the laptop at 01:46 IST on 21
+  October (key, model, endpoint and tool calling); the last full model run is the 21:13 IST live PASS on the previous
+  build. Run `scripts/llm_check.py --live` on the laptop.
+- Yahoo's intraday intervals and live 5-minute bars. `scripts/intraday_check.py` must run on the laptop, and the
+  first market session after this build is 21 October from 09:15 IST.
+- The public app with this build. It still runs the earlier build until the new files are uploaded to GitHub and the
+  Gemini key is added to its secrets; nothing here claims the public app is fixed.
+- The 70 tests added on the night of 20 October have run in the sandbox environments only until the laptop reruns the
+  suite (the laptop's last run passed 186 of 186, before the 41 tests of the earlier evening).
+- Live data during NSE market hours for the daily path. The laptop checks ran on a holiday, so a bar still in
+  progress (before 16:15 IST) has been tested only with labelled test data.
+- How Yahoo treats each corporate action of the watchlist companies (bonus issues and demergers). The app flags moves
+  of 25% or more but cannot see the provider's adjustment policy.
+- The 2024 holiday list was read from a broker's copy of the NSE circular, because the official PDF could not be
+  retrieved.
+- `run_app.bat` on Windows has not been observed starting from scratch; the app on the laptop has been started from
+  PowerShell.

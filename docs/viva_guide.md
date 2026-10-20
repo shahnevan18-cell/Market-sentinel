@@ -46,8 +46,11 @@ are computed in Python, and a grounding check flags any figure in the LLM's text
 rupee, lakh and crore formats too. Hypothesis scores come from a fixed rubric, so the conclusion can be audited
 criterion by criterion.
 
-Without an LLM key, a fixed protocol calls the same tools in a set order and writes the narrative from templates. The
-report says so clearly. This is the honest fallback for a live demonstration without paid API access.
+Without an LLM key, or when the rule-based protocol is chosen in the sidebar, a fixed protocol calls the same tools in
+a set order and writes the narrative from templates. Each report names the engine that actually ran and why:
+model-directed, a fallback after a provider error (with the reason), a fallback because the model's output could not
+be used, the rule-based protocol chosen by the user, or no credentials configured. Having a key is never reported as
+the model having run. This is the honest fallback for a live demonstration without paid API access.
 
 ## Worked example: Saffron Bank (fictional), 30 September 2026
 
@@ -309,9 +312,19 @@ firm's tax "ITC demand", and social posts and price-forecast pages counted as ev
 notes as limitations, choose the subject most publishers report (for ITC, Citi's rating upgrade), ignore social posts
 as publishers and screen out tips and forecast pages. Each fix has a regression test with fictional names.
 
+What does the intraday watch add, and what does it not?
+It shows 5-minute bars for the NIFTY 50 and the 25 stocks and flags a latest bar that is unusual for its time of day:
+its return, its return after removing beta times the NIFTY 50's, and its volume, each as a robust z against the same
+bar in up to 40 earlier sessions (at least 15 needed), flagged at |z| of 4. The cut-off is stricter than the daily
+tests because 26 symbols with 75 bars a session make about 2,000 comparisons a day. It refreshes only while the page
+is open, uses unofficial and possibly delayed Yahoo bars, and is kept apart from the daily alerts: it changes no
+priority score and starts no investigation. The investigations still work on daily bars.
+
 What would you add with more time?
-Intraday data to time moves against announcements, larger peer groups from an official classification, reading the
-text of filings, an authorised or licensed feed of NSE and BSE announcements, a labelled evaluation set reviewed by people, and scheduled monitoring with alerts.
+Intraday bars inside the investigation to time moves against announcements (the intraday watch only displays and
+flags recent bars), larger peer groups from an official classification, reading the text of filings, an authorised or
+licensed feed of NSE and BSE announcements, a labelled evaluation set reviewed by people, and scheduled monitoring
+with alerts that runs without a browser open.
 
 ## Glossary
 

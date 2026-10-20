@@ -21,13 +21,23 @@ os.environ["MS_CACHE_DIR"] = str(_TMP / "cache")
 os.environ["MS_HISTORY_DIR"] = str(_TMP / "investigations")
 os.environ.setdefault("MS_DEFAULT_MODE", "demo")
 os.environ["MS_DISABLE_DOTENV"] = "1"          # never read a developer's real API keys during tests
-for _k in ("ANTHROPIC_API_KEY", "LLM_API_KEY", "LLM_PROVIDER"):
+LLM_ENV = ("ANTHROPIC_API_KEY", "LLM_API_KEY", "LLM_PROVIDER", "GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_MODEL",
+           "LLM_BASE_URL", "MS_LLM_PASSCODE")
+for _k in LLM_ENV:
     os.environ.pop(_k, None)
 
 from config.settings import AnalysisConfig, DataConfig, LLMConfig, Settings  # noqa: E402
 from providers.market_data import STANDARD_COLUMNS, load_demo_dataset  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _no_llm_settings_leak(monkeypatch):
+    """Every test starts without LLM settings, and anything a test writes to them directly is removed afterwards."""
+    for k in LLM_ENV:
+        monkeypatch.setenv(k, "")
+        monkeypatch.delenv(k)
 
 
 @pytest.fixture(scope="session")

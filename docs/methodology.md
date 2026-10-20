@@ -335,3 +335,77 @@ the score when cells are wide enough, so the grid does not rely on colour alone.
 cell by the robust z-score of the day's return, which measures how unusual the move was. Anomaly intensity and alert
 priority are related but not the same: priority also weighs market-relative movement, volume and the volatility
 regime. Neither says whether a stock is a good or bad investment.
+
+## 17. Reasoning engine modes
+
+Every investigation records which engine ran and why (`engine.mode` in the record, an "Engine selection" entry at
+the top of the audit trail, and the strip above the report):
+
+| Mode | Meaning |
+|---|---|
+| `llm` | The model (for example Gemini, `gemini-3.5-flash`) chose the tools, read their results and submitted findings that passed schema validation, for both the investigation and the risk step |
+| `mixed` | One of the two steps was model-directed; the other fell back to the rule-based protocol, and the reason is named |
+| `llm_provider_fallback` | The model was called but the provider returned an error (key rejected, daily quota used up, rate limit, model not found, provider busy, timeout, network, unusable response); the rule-based protocol produced the report |
+| `llm_failed` | The model ran but its output could not be used (it stopped calling tools, its findings failed validation twice, or it ran out of turns); the rule-based protocol produced the report |
+| `rules_selected` | The rule-based protocol was chosen in the sidebar |
+| `rules_no_credentials` | No key is configured on this deployment |
+| `rules_config_problem` | LLM settings were given but cannot be used (for example a provider without a key, or no model name) |
+| `rules_switched_off` | `LLM_PROVIDER` is set to none |
+| `rules_locked` | The deployment asks for a passcode (`MS_LLM_PASSCODE`) and it has not been entered in this session |
+
+A configured key is not the same as a model-directed run: the mode is set from what actually happened. Each model
+turn in the audit trail records the model name, the tools it asked for and the provider's token counts; each failed
+call records its error category. Provider messages are stored with keys removed. The sidebar's Test connection
+sends one small request that must come back as a tool call, so it checks the key, the model name, the endpoint and
+the tool-calling path in one request without running an investigation.
+
+## 18. Intraday watch (5-minute bars)
+
+The Market overview has an optional intraday section, separate from the daily analytics above. It changes no daily
+score, adds no alert and starts no investigation, and it never calls the LLM.
+
+Data. 5-minute bars for NIFTY 50 and the 25 stocks come from Yahoo Finance through yfinance (unofficial; it may be
+delayed and does not promise when a bar appears). Timestamps are read in IST. Only regular-session bars on the
+5-minute grid from 09:15 to 15:30 IST are kept; rows outside the session, rows off the grid (a live quote stamped at
+the current minute), duplicates and rows without a price are dropped and counted. A bar whose end lies after the
+time it was received is still forming: it is shown, marked, and excluded from every statistic. Missing bars are
+never filled, and missing or zero volume is stored as missing (Yahoo reports no volume for indices). Daily bars are
+never relabelled as intraday; in demonstration mode the section says intraday bars are not simulated.
+
+Refresh. The section refreshes only while the page is open: a Streamlit timed fragment reruns it every 5, 10 or 15
+minutes when Auto-refresh is on (off by default), and Refresh now requests at once. Bars are held in the server's
+memory and shared by all sessions:
+
+| Rule | Value |
+|---|---|
+| Cache life of the latest bars | one bar interval less 20 seconds (4 min 40 s) |
+| Refresh now | ignores the cache; a request that finished in the last 15 seconds is reused instead of repeated |
+| Two sessions refreshing together | one request (requests are serialised by a lock) |
+| History for baselines | about 60 days of 5-minute bars, requested once per day; later refreshes request the last 5 days |
+| A failed refresh | keeps the last good bars and states their age; one failing symbol keeps its earlier bars, labelled |
+| Market closed | automatic refresh sends no request once the last session's bars are in memory; Refresh now still does |
+
+Status. Each refresh is labelled Fresh (the newest complete bar is at most one bar behind the clock), Waiting for new
+data (no newer bar since the last refresh, data more than one bar behind the clock, or the market closed, with the
+reason and the next open), Cached (served from memory without a request), Stale (the last request failed; older bars
+shown with their age) or Unavailable (nothing loaded, or the first request failed). The status line also shows the
+time of the last request, the latest complete bar in IST, the interval and the source.
+
+Detection. Intraday volume and volatility follow a strong daily pattern, busy after the open and before the close
+and quieter around midday, so each measure of the latest complete bar is compared with the same bar of the day in up
+to 40 earlier sessions:
+
+- 5-minute return: log change from the previous bar of the same session; the 09:15 bar is measured from the previous
+  trading session's last bar, so its baseline also consists of opening bars with their overnight gaps. After a
+  missing bar the return is left missing.
+- Return relative to NIFTY 50: stock return minus beta times NIFTY 50's return for the same bar, with beta estimated
+  from the baseline sessions' 5-minute returns (opening bars excluded, at least 300 pairs, limited to -1 to 3).
+- Volume: log volume of the bar.
+
+Robust z = (value - median) / (1.4826 x MAD) over the baseline values of that bar of the day. A bar is flagged when
+|z| is 4 or more for either return measure, or z is 4 or more for volume. That is stricter than the daily tests
+because 26 symbols with 75 bars a session make about 2,000 comparisons a day; a lower cut-off would flag chance
+extremes every hour. A measure needs at least 15 earlier sessions with a value for that bar of the day; with fewer it
+is shown for display only and never flagged. The section also lists, for the session so far, the largest 5-minute
+move for its time of day per stock. Flags are prompts for review, not conclusions, and say nothing about whether a
+stock is a good or bad investment.

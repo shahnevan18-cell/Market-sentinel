@@ -19,14 +19,103 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from config.settings import LLMConfig
 
 ANTHROPIC_VERSION = "2023-06-01"
 
 
+SECRET_PATTERNS = [re.compile(r"AIza[0-9A-Za-z_\-]{20,}"), re.compile(r"sk-[A-Za-z0-9_\-]{12,}"),
+                   re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"), re.compile(r"(?i)(api[_-]?key[=:]\s*)[^\s&\"']+")]
+
+
+def redact(text: str, secrets: list[str | None] | tuple = ()) -> str:
+    """Remove API keys from text before it is shown, logged or saved: the configured key itself and anything shaped
+    like a Google, OpenAI-style or bearer credential."""
+    out = str(text or "")
+    for secret in secrets:
+        if secret and len(secret) >= 6:
+            out = out.replace(secret, "[redacted]")
+    for pat in SECRET_PATTERNS:
+        out = pat.sub(lambda m: (m.group(1) if m.lastindex else "") + "[redacted]", out)
+    return out
+
+
 class LLMError(RuntimeError):
-    """Raised when the model provider returns an error or an unusable response."""
+    """Raised when the model provider returns an error or an unusable response. Messages are redacted."""
+
+    def __init__(self, message: str = ""):
+        super().__init__(redact(message))
+
+
+ERROR_CATEGORIES = {
+    "invalid_credentials": "The provider rejected the key (HTTP 401 or 403). Check the key's value and that it belongs "
+                           "to a project where the API is enabled.",
+    "quota_daily": "The daily request quota for this model and Google project is used up. Google resets it at "
+                   "midnight US Pacific time.",
+    "rate_limited": "The provider rate-limited the requests (HTTP 429) beyond the waits the app allows.",
+    "model_not_found": "The model name was not found for this key (HTTP 404). Check LLM_MODEL.",
+    "provider_busy": "The provider was overloaded or unavailable (HTTP 503 or 529) after the allowed retries.",
+    "timeout": "The provider did not answer within the time limit.",
+    "network": "The provider could not be reached (network error).",
+    "invalid_response": "The provider returned a response the app could not use.",
+    "no_tool_call": "The model stopped calling tools without submitting its findings.",
+    "invalid_output": "The model's findings failed validation twice, so they were not used.",
+    "turn_limit": "The model did not submit valid findings within the allowed number of turns.",
+    "provider_error": "The provider returned an error.",
+}
+# Errors raised by the provider or the network, as opposed to the model running but producing unusable output.
+PROVIDER_ERROR_CATEGORIES = {"invalid_credentials", "quota_daily", "rate_limited", "model_not_found", "provider_busy",
+                             "timeout", "network", "invalid_response", "provider_error"}
+
+
+def quota_reset_ist(now: datetime | None = None) -> datetime:
+    """Next midnight in US Pacific time (when Google resets daily Gemini quotas), expressed in IST."""
+    pacific, ist = ZoneInfo("America/Los_Angeles"), ZoneInfo("Asia/Kolkata")
+    now = (now or datetime.now(timezone.utc)).astimezone(pacific)
+    nxt = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=pacific)
+    return nxt.astimezone(ist)
+
+
+def describe_error(category: str, now: datetime | None = None) -> str:
+    """Plain explanation of an error category; for a daily quota it adds the reset time in IST."""
+    text = ERROR_CATEGORIES.get(category, ERROR_CATEGORIES["provider_error"])
+    if category == "quota_daily":
+        reset = quota_reset_ist(now)
+        text += f" That is {reset:%H:%M} IST on {reset:%a %d %b}."
+    return text
+
+
+def classify_error(message: str) -> str:
+    """Map an LLM error message to a category in ERROR_CATEGORIES."""
+    m = str(message or "")
+    low = m.lower()
+    if "http 401" in low or "http 403" in low or "api key not valid" in low or "permission_denied" in low \
+            or "unauthenticated" in low or "invalid x-api-key" in low:
+        return "invalid_credentials"
+    if "daily request quota" in low or "perday" in low:
+        return "quota_daily"
+    if "http 429" in low:
+        return "rate_limited"
+    if "http 404" in low:
+        return "model_not_found"
+    if "http 503" in low or "http 529" in low or "overloaded" in low:
+        return "provider_busy"
+    if "timeout" in low or "timed out" in low:
+        return "timeout"
+    if "network error" in low or "connection" in low or "name resolution" in low:
+        return "network"
+    if "not json" in low or "unexpected response" in low or "unusable response" in low:
+        return "invalid_response"
+    if "without submitting" in low or "stopped calling tools" in low:
+        return "no_tool_call"
+    if "failed validation" in low:
+        return "invalid_output"
+    if "no valid submission within" in low:
+        return "turn_limit"
+    return "provider_error"
 
 
 @dataclass
@@ -92,7 +181,8 @@ def _post(url: str, headers: dict, payload: dict, timeout: float, retries: int =
             except ValueError as exc:
                 raise LLMError("The LLM provider returned a response that is not JSON.") from exc
         body = resp.text or ""
-        detail = body[:300]
+        key = (headers.get("Authorization") or "").replace("Bearer ", "") or headers.get("x-api-key")
+        detail = redact(body[:300], [key])
         last = LLMError(f"LLM provider returned HTTP {resp.status_code}: {detail}")
         if resp.status_code in (429, 503, 529):
             if resp.status_code == 429 and is_daily_quota(body):
@@ -289,3 +379,42 @@ class LLMBackend:
 
 def make_backend(cfg: LLMConfig) -> LLMBackend | None:
     return LLMBackend(cfg) if cfg.enabled else None
+
+
+PROBE_TOOL = {"name": "report_ready", "description": "Confirm that tool calling works.",
+              "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["ready"]}},
+                             "required": ["status"]}}
+
+
+def probe(cfg: LLMConfig, timeout: float = 30.0) -> dict:
+    """One real request to the configured model, asking it to call a test tool.
+
+    It checks the key, the endpoint, the model name and tool calling in a single call, and costs one request of the
+    quota. No retries or long waits, so a quota problem shows at once. The result never contains the key.
+    """
+    out = {"ok": False, "model": cfg.model, "vendor": cfg.vendor, "tool_called": False, "category": None,
+           "message": "", "summary": "", "detail": "", "latency_ms": None, "requests": 1}
+    if not cfg.enabled:
+        out.update(requests=0, category="not_configured", message=cfg.status_text(), summary=cfg.status_text())
+        return out
+    started = time.perf_counter()
+    try:
+        quick = LLMConfig(**{**cfg.__dict__, "timeout": timeout, "rate_limit_retries": 0, "max_tokens": 200})
+        conv = LLMBackend(quick).start("You are a connection test. Call the tool you are given.", [PROBE_TOOL])
+        conv.add_user_text("Call report_ready with status 'ready'.")
+        turn = conv.step(force_tool="report_ready")
+        called = any(c.name == "report_ready" for c in turn.tool_calls)
+        text = "The model answered and called the test tool." if called else ERROR_CATEGORIES["no_tool_call"]
+        out.update(ok=called, tool_called=called, category=None if called else "no_tool_call", message=text,
+                   summary=text)
+    except LLMError as exc:
+        cat = classify_error(str(exc))
+        detail = redact(str(exc), [cfg.api_key])[:240]
+        out.update(category=cat, summary=describe_error(cat), detail=detail,
+                   message=f"{describe_error(cat)} Detail: {detail}")
+    except Exception as exc:  # noqa: BLE001 - reported, never raised into the page
+        detail = redact(f"{type(exc).__name__}: {exc}"[:240], [cfg.api_key])
+        out.update(category="invalid_response", summary=ERROR_CATEGORIES["invalid_response"], detail=detail,
+                   message=f"{ERROR_CATEGORIES['invalid_response']} ({detail})")
+    out["latency_ms"] = round((time.perf_counter() - started) * 1000)
+    return out
