@@ -1,0 +1,22 @@
+# Secrets: never commit these
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+venv/
+.pytest_cache/
+
+# Runtime data (re-created automatically)
+data/*
+
+# Shared zips and OS or editor files
+*.zip
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
