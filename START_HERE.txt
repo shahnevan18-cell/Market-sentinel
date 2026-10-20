@@ -1,0 +1,42 @@
+MARKET SENTINEL: HOW TO OPEN IT
+Business Analytics project (Theme 4: Agentic AI) by Darshil Mittal (A016) and Nevan Shah (A043)
+
+You need Python 3.11 or newer and an internet connection for the first start.
+If Python is missing, the launcher says so. Get it from https://www.python.org/downloads/
+and, on Windows, tick "Add python.exe to PATH" in the installer.
+
+
+WINDOWS
+1. Right-click the zip file, choose "Extract All", then open the extracted folder.
+   Do not run anything from inside the zip without extracting it first.
+2. Double-click run_app.bat.
+   If Windows shows "Windows protected your PC", click "More info", then "Run anyway".
+3. The first start sets everything up by itself: it creates a private Python environment
+   in a .venv folder and downloads the packages (about 100 MB, a few minutes).
+   Later starts take a few seconds.
+4. The app opens in your browser at http://localhost:8501.
+   Keep the black window open while you use the app. Close it to stop the app.
+
+
+MAC
+1. Double-click the zip to extract it.
+2. Open Terminal, type  cd  followed by a space, drag the extracted folder into the
+   Terminal window, and press Return.
+3. Type  python3 launch.py  and press Return. The first start sets everything up as
+   described for Windows, then the app opens at http://localhost:8501.
+   Keep Terminal open while you use the app. Press Control+C in it to stop.
+   (Double-clicking run_app.command also works if macOS allows it; if it refuses,
+   use Terminal as described.)
+
+
+USING THE APP
+- Live NSE market data needs internet. Without it, choose "Demonstration data (synthetic)"
+  under Data source in the sidebar; it is clearly labelled as synthetic.
+- Start on Market overview, pick an alert in Anomaly monitor or Investigation workspace,
+  and press Run investigation. Every report can be downloaded from the Export tab.
+- AI reasoning is optional. Without an API key the app uses its rule-based engine and
+  says so. To add a key, copy .env.example to a new file named .env, fill in the key,
+  and restart the app.
+
+More detail: README.md, docs/user_manual.md and docs/deployment.md.
+It is an educational analysis tool. It does not trade or give investment advice.

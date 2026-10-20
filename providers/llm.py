@@ -1,0 +1,291 @@
+"""LLM clients with tool calling.
+
+Two wire formats are supported, both through plain HTTPS calls so the exact
+requests are easy to inspect:
+
+* Anthropic Messages API (tool_use / tool_result content blocks).
+* Any OpenAI-compatible chat-completions endpoint (tool_calls / role "tool"),
+  which covers OpenAI, Google Gemini's OpenAI-compatible endpoint, Groq,
+  OpenRouter and local servers such as Ollama.
+
+The LLM never computes numbers for the app. It chooses which tools to call
+and writes qualitative judgements; every number comes back from Python tools.
+A Claude chat subscription does not include API access: an API key with
+credit (or a provider's free tier) is needed for live LLM mode.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import dataclass, field
+
+from config.settings import LLMConfig
+
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+class LLMError(RuntimeError):
+    """Raised when the model provider returns an error or an unusable response."""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+    parse_error: str | None = None
+
+
+@dataclass
+class LLMTurn:
+    text: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    stop_reason: str | None = None
+    usage: dict = field(default_factory=dict)
+
+
+RETRY_DELAY_RE = re.compile(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"')
+
+
+def requested_wait(headers, body: str) -> float | None:
+    """Seconds the provider asks the client to wait: the Retry-After header, or Google's RetryInfo ("36s")."""
+    value = (headers or {}).get("Retry-After") or (headers or {}).get("retry-after")
+    if value:
+        try:
+            return float(value)
+        except ValueError:
+            pass
+    m = RETRY_DELAY_RE.search(body or "")
+    return float(m.group(1)) if m else None
+
+
+def is_daily_quota(body: str) -> bool:
+    """A per-day quota (for example Gemini's free-tier requests per day) does not reset within a run."""
+    return "PerDay" in (body or "") or "per day" in (body or "").lower()
+
+
+def _post(url: str, headers: dict, payload: dict, timeout: float, retries: int = 1, rate_limit_retries: int = 2,
+          max_wait: float = 65.0, waits: list | None = None, sleep=time.sleep):
+    """POST with two separate retry budgets: network errors and rate limits.
+
+    On HTTP 429 or 503 the call waits as long as the provider asks (Retry-After or Google's retryDelay), up to
+    `max_wait` seconds per wait and `rate_limit_retries` times. A per-day quota or a longer requested wait fails at
+    once with a clear message, so the orchestrator can fall back honestly. Every wait is appended to `waits`.
+    """
+    import requests
+    last = None
+    net_attempts = rate_attempts = 0
+    while True:
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001
+            last = LLMError(f"Network error calling the LLM provider: {type(exc).__name__}: {str(exc)[:200]}")
+            net_attempts += 1
+            if net_attempts > retries:
+                break
+            sleep(1.5 * net_attempts)
+            continue
+        if resp.status_code == 200:
+            try:
+                return resp.json()
+            except ValueError as exc:
+                raise LLMError("The LLM provider returned a response that is not JSON.") from exc
+        body = resp.text or ""
+        detail = body[:300]
+        last = LLMError(f"LLM provider returned HTTP {resp.status_code}: {detail}")
+        if resp.status_code in (429, 503, 529):
+            if resp.status_code == 429 and is_daily_quota(body):
+                raise LLMError(f"LLM provider returned HTTP 429: the daily request quota is used up, so waiting would "
+                               f"not help. Try again tomorrow or switch LLM_MODEL. Detail: {detail}")
+            asked = requested_wait(getattr(resp, "headers", {}), body)
+            wait = asked if asked is not None else 5.0 * (rate_attempts + 1)
+            if rate_attempts >= rate_limit_retries or wait > max_wait:
+                break
+            rate_attempts += 1
+            if waits is not None:
+                reason = "rate limit" if resp.status_code == 429 else "provider busy"
+                source = "as the provider asked" if asked is not None else "(the provider gave no wait time)"
+                waits.append(f"HTTP {resp.status_code} {reason}: waited {wait:.0f} s {source} "
+                             f"(retry {rate_attempts} of {rate_limit_retries}).")
+            sleep(wait + 1.0)
+            continue
+        if resp.status_code in (500, 502) and net_attempts < retries:
+            net_attempts += 1
+            sleep(2.0 * net_attempts)
+            continue
+        break
+    raise last or LLMError("Unknown LLM error.")
+
+
+def _post_cfg(cfg: LLMConfig, url: str, headers: dict, payload: dict, waits: list | None):
+    return _post(url, headers, payload, cfg.timeout, rate_limit_retries=cfg.rate_limit_retries,
+                 max_wait=cfg.rate_limit_max_wait, waits=waits)
+
+
+class Conversation:
+    """Provider-neutral conversation used by the agent loop."""
+
+    waits: list
+
+    def pop_waits(self) -> list[str]:
+        """Rate-limit waits since the last call, so the agent loop can record them in the audit trail."""
+        out, self.waits[:] = list(self.waits), []
+        return out
+
+    def add_user_text(self, text: str) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def step(self, force_tool: str | None = None) -> LLMTurn:  # pragma: no cover
+        raise NotImplementedError
+
+    def add_tool_results(self, results: list[tuple[str, str, bool]]) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+
+class AnthropicConversation(Conversation):
+    def __init__(self, cfg: LLMConfig, system: str, tools: list[dict]):
+        self.cfg = cfg
+        self.system = system
+        self.tools = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]}
+                      for t in tools]
+        self.messages: list[dict] = []
+        self.waits: list[str] = []
+
+    def add_user_text(self, text: str) -> None:
+        if self.messages and self.messages[-1]["role"] == "user" and isinstance(self.messages[-1]["content"], list):
+            self.messages[-1]["content"].append({"type": "text", "text": text})
+        else:
+            self.messages.append({"role": "user", "content": [{"type": "text", "text": text}]})
+
+    def step(self, force_tool: str | None = None) -> LLMTurn:
+        payload = {
+            "model": self.cfg.model,
+            "max_tokens": self.cfg.max_tokens,
+            "system": self.system,
+            "messages": self.messages,
+            "tools": self.tools,
+        }
+        if force_tool:
+            payload["tool_choice"] = {"type": "tool", "name": force_tool}
+        headers = {
+            "x-api-key": self.cfg.api_key or "",
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+        base = (self.cfg.base_url or "https://api.anthropic.com").rstrip("/")
+        try:
+            data = _post_cfg(self.cfg, f"{base}/v1/messages", headers, payload, self.waits)
+        except LLMError as exc:
+            if force_tool and "tool_choice" in str(exc):
+                payload.pop("tool_choice", None)
+                data = _post_cfg(self.cfg, f"{base}/v1/messages", headers, payload, self.waits)
+            else:
+                raise
+        content = data.get("content") or []
+        # Keep every block (including any thinking blocks) so the next request is well formed.
+        self.messages.append({"role": "assistant", "content": content})
+        texts = [b.get("text", "") for b in content if b.get("type") == "text"]
+        calls = [ToolCall(id=b["id"], name=b["name"], arguments=b.get("input") or {})
+                 for b in content if b.get("type") == "tool_use"]
+        return LLMTurn(text="\n".join(t for t in texts if t), tool_calls=calls,
+                       stop_reason=data.get("stop_reason"), usage=data.get("usage") or {})
+
+    def add_tool_results(self, results: list[tuple[str, str, bool]]) -> None:
+        blocks = [{"type": "tool_result", "tool_use_id": cid, "content": content, "is_error": bool(err)}
+                  for cid, content, err in results]
+        self.messages.append({"role": "user", "content": blocks})
+
+
+SAFE_SCHEMA_KEYS = {"type", "properties", "items", "required", "enum", "description"}
+
+
+def simplify_schema(schema):
+    """Keep only widely supported JSON-schema keywords (some providers reject the rest).
+
+    Removed constraints (lengths, ranges, additionalProperties) are still enforced
+    locally by ToolRegistry and the Pydantic submission models.
+    """
+    if isinstance(schema, dict):
+        out = {}
+        for k, v in schema.items():
+            if k not in SAFE_SCHEMA_KEYS:
+                continue
+            if k == "properties" and isinstance(v, dict):
+                out[k] = {name: simplify_schema(sub) for name, sub in v.items()}
+            else:
+                out[k] = simplify_schema(v)
+        return out
+    if isinstance(schema, list):
+        return [simplify_schema(x) for x in schema]
+    return schema
+
+
+class OpenAICompatibleConversation(Conversation):
+    def __init__(self, cfg: LLMConfig, system: str, tools: list[dict]):
+        self.cfg = cfg
+        self._n_calls = 0
+        self.waits: list[str] = []
+        self.tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                                        "parameters": simplify_schema(t["parameters"])}}
+                      for t in tools]
+        self.messages: list[dict] = [{"role": "system", "content": system}]
+
+    def add_user_text(self, text: str) -> None:
+        self.messages.append({"role": "user", "content": text})
+
+    def step(self, force_tool: str | None = None) -> LLMTurn:
+        payload = {"model": self.cfg.model, "messages": self.messages, "tools": self.tools}
+        payload["tool_choice"] = {"type": "function", "function": {"name": force_tool}} if force_tool else "auto"
+        headers = {"Authorization": f"Bearer {self.cfg.api_key}", "Content-Type": "application/json"}
+        base = (self.cfg.base_url or "https://api.openai.com/v1").rstrip("/")
+        data = _post_cfg(self.cfg, f"{base}/chat/completions", headers, payload, self.waits)
+        try:
+            choice = data["choices"][0]
+            msg = choice["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError("Unexpected response shape from the OpenAI-compatible endpoint.") from exc
+        calls, stored = [], []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            raw = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(raw) if isinstance(raw, str) else dict(raw)
+                err = None
+            except (ValueError, TypeError) as exc:
+                args, err = {}, f"Arguments were not valid JSON: {exc}"
+            self._n_calls += 1
+            call_id = tc.get("id") or f"call_ms_{self._n_calls}"
+            calls.append(ToolCall(id=call_id, name=fn.get("name", ""), arguments=args, parse_error=err))
+            stored.append({**tc, "id": call_id})     # provider fields kept verbatim; a missing id is filled in
+        assistant = {"role": "assistant", "content": msg.get("content") or ""}
+        if stored:
+            assistant["tool_calls"] = stored
+        if msg.get("extra_content") is not None:     # provider-specific data that must be sent back unchanged
+            assistant["extra_content"] = msg["extra_content"]
+        self.messages.append(assistant)
+        return LLMTurn(text=msg.get("content") or "", tool_calls=calls,
+                       stop_reason=choice.get("finish_reason"), usage=data.get("usage") or {})
+
+    def add_tool_results(self, results: list[tuple[str, str, bool]]) -> None:
+        for cid, content, err in results:
+            self.messages.append({"role": "tool", "tool_call_id": cid,
+                                  "content": ("ERROR: " + content) if err else content})
+
+
+class LLMBackend:
+    def __init__(self, cfg: LLMConfig):
+        self.cfg = cfg
+
+    @property
+    def label(self) -> str:
+        return self.cfg.describe()
+
+    def start(self, system: str, tools: list[dict]) -> Conversation:
+        if self.cfg.provider == "anthropic":
+            return AnthropicConversation(self.cfg, system, tools)
+        return OpenAICompatibleConversation(self.cfg, system, tools)
+
+
+def make_backend(cfg: LLMConfig) -> LLMBackend | None:
+    return LLMBackend(cfg) if cfg.enabled else None

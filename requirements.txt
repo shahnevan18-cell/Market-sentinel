@@ -1,0 +1,14 @@
+# Market Sentinel dependencies.
+# Lower bounds are the oldest versions the test suite was run against (all 187 tests passed);
+# the full build was also tested with streamlit 1.66, pandas 3.0, numpy 2.5, plotly 7.1, yfinance 1.7.
+streamlit>=1.55,<2
+pandas>=2.2,<4
+numpy>=2.1,<3
+plotly>=5.24,<8
+yfinance>=1.0,<2
+requests>=2.31,<3
+pydantic>=2.8,<3
+python-dotenv>=1.0,<2
+markdown>=3.6,<4
+tzdata>=2024.1
+pytest>=8.0,<10

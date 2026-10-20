@@ -1,0 +1,8 @@
+[
+ {"id": "a1", "content": {"id": "a1", "contentType": "STORY", "title": "Testco slides as guidance disappoints",
+   "summary": "Shares fell in early trading after the company lowered its outlook.",
+   "pubDate": "2025-03-04T15:02:00Z", "provider": {"displayName": "Fixture News"},
+   "canonicalUrl": {"url": "https://example.com/fixture/a1"}, "clickThroughUrl": {"url": "https://example.com/fixture/a1?x"}}},
+ {"uuid": "b2", "title": "Older format headline about Testco", "publisher": "Legacy Fixture",
+  "link": "https://example.com/fixture/b2", "providerPublishTime": 1741100400}
+]
