@@ -142,3 +142,21 @@ def test_selected_alert_panel_shows_the_full_details(monkeypatch):
     html = " ".join(str(getattr(h.proto, "body", "")) for h in at.get("html"))
     assert 'aria-label="Selected alert"' in html and "Flagged because" in html
     assert any(b.label == "Investigate this alert" for b in at.button)
+
+
+def test_every_stock_alert_opens_on_the_monitor_page(monkeypatch):
+    """One alert per stock, including groups with no sector index (pandas 3 stores that missing value as NaN,
+    which is truthy) and stocks with no peers. Found on the hosted app on 21 Oct: a TypeError for such alerts."""
+    at = _monitor_app(monkeypatch)
+    at.multiselect(key="mon_sev").set_value([]).run()                   # every severity, so every stock appears
+    labels = at.selectbox(key="mon_pick").options                       # "SYMBOL · date · type · Priority N"
+    first_per_stock = {}
+    for i, label in enumerate(labels):
+        first_per_stock.setdefault(label.split(" · ")[0], i)
+    assert {"IRONBRG", "RIVERLN"} <= set(first_per_stock)               # the peer-only groups are covered
+    for ticker, i in first_per_stock.items():
+        at.selectbox(key="mon_pick").select_index(i).run()
+        assert not at.exception, (ticker, [e.value for e in at.exception])
+    at.selectbox(key="mon_pick").select_index(first_per_stock["IRONBRG"]).run()
+    cells = " ".join(str(v) for df in at.dataframe for v in df.value.to_numpy().ravel())
+    assert "none configured for this group" in cells

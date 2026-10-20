@@ -170,7 +170,7 @@ it. `docs/llm_check_result.md` and `docs/llm_check_live_result.md` hold the two 
 ## Tests
 
 ```powershell
-python -m pytest -q                  # 297 automated tests, no internet needed
+python -m pytest -q                  # 298 automated tests, no internet needed
 python scripts/validate_symbols.py   # live check of all 30 symbols (rows, INR, exchange, time zone)
 python scripts/smoke_test.py         # live check of Yahoo (NSE), Google News India and the full pipeline
 python scripts/intraday_check.py     # live check of Yahoo's intraday intervals for NIFTY 50 and four stocks

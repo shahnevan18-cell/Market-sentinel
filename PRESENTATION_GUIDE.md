@@ -130,7 +130,7 @@ The evening before, on the presentation laptop, in PowerShell:
 
 ```powershell
 cd "C:\Users\Navin shah\Documents\market_sentinel"
-.\.venv\Scripts\python.exe -m pytest -q                  # expect 297 passed
+.\.venv\Scripts\python.exe -m pytest -q                  # expect 298 passed
 .\.venv\Scripts\python.exe scripts\validate_symbols.py   # expect 30 symbols, no FAIL
 .\.venv\Scripts\python.exe scripts\smoke_test.py --no-llm
 .\.venv\Scripts\python.exe scripts\intraday_check.py     # which intraday intervals Yahoo returns

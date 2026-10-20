@@ -164,12 +164,16 @@ def render() -> None:
                                     "Weight": st.column_config.NumberColumn(format="%.2f"),
                                     "Points": st.column_config.NumberColumn(format="%.1f")})
         c.section("Baseline and context")
+        # A group without a sector index has no symbol here. pandas 3 stores that missing text as NaN, which is
+        # truthy, so test for a real string rather than for truthiness.
+        sector_index = ev.get("sector_index")
+        has_index = isinstance(sector_index, str) and bool(sector_index)
         base = pd.DataFrame([
             ("Baseline median return", c.fmt_pct(ev["ret_median"])),
             ("Beta (120 sessions before)", c.fmt_num(ev["beta"])),
             (f"{bench_name} return (z)", f"{c.fmt_pct(ev['mkt_ret'])} ({c.fmt_z(ev['z_mkt'])})"),
-            ((f"{universe.short_label(ev['sector_index'])} return (z)", f"{c.fmt_pct(ev['sector_ret'])} ({c.fmt_z(ev['z_sector'])})")
-             if ev.get("sector_index") else ("Sector index", "none configured for this group (peer comparison only)")),
+            ((f"{universe.short_label(sector_index)} return (z)", f"{c.fmt_pct(ev['sector_ret'])} ({c.fmt_z(ev['z_sector'])})")
+             if has_index else ("Sector index", "none configured for this group (peer comparison only)")),
             ("Return vs peer median (z)", f"{c.fmt_pct(ev['rel_peer_ret'])} ({c.fmt_z(ev['z_rel_peer'])})"),
             ("Volume / 60-day median", f"{c.fmt_num(ev['volume_ratio'], 1)}x of {c.fmt_big(ev['volume_median'])} shares"),
             ("Volatility regime ratio", c.fmt_num(ev["vol_ratio"])),

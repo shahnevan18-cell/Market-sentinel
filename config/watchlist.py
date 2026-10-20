@@ -149,7 +149,7 @@ class Universe:
 
     def short_label(self, symbol: str | None) -> str:
         """Compact label for charts and tables: RELIANCE.NS -> RELIANCE, ^NSEI -> NIFTY 50."""
-        if not symbol:
+        if not isinstance(symbol, str) or not symbol:       # None, or NaN from a pandas text column
             return ""
         if symbol in self.index_symbols:
             name = self.display_name(symbol)
