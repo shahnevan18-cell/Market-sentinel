@@ -79,6 +79,51 @@ class RiskStrategist:
                             tool_calls=registry.calls_used)
 
 
+# Evidence that would separate two close explanations, keyed by the pair (in id order).
+_PAIR_CHANGE = {
+    ("H2", "H3"): ("A company disclosure on the NSE or BSE filings pages inside the window would favour company news "
+                   "(H3); one shared driver behind the peers, such as a large peer's results or a sector policy, would "
+                   "favour a sector-wide move (H2)."),
+    ("H1", "H2"): ("A sector index move well beyond the market's would favour a sector-wide move (H2); a similar move "
+                   "across most sectors would favour the broad market (H1)."),
+    ("H1", "H3"): "A company disclosure inside the window would favour company news (H3) over a broad market move (H1).",
+    ("H3", "H4"): ("An official announcement inside the window would favour company news (H3); finding none after a "
+                   "manual NSE/BSE check would leave unexplained trading (H4) as the better fit."),
+    ("H2", "H4"): ("Peers that keep moving with the stock in later sessions would favour a sector driver (H2); a stock "
+                   "that diverges again on high volume would favour unexplained trading (H4)."),
+    ("H1", "H4"): ("A market-wide reversal that takes the stock with it would favour the broad market (H1); a stock-only "
+                   "move on high volume would favour unexplained trading (H4)."),
+}
+
+
+def _h5_change(rubric) -> list[str]:
+    """What would make an unresolved result clearer, built from the H5 criteria that actually fired."""
+    if rubric is None:
+        return ["A completed rubric evaluation is needed before the conclusion can change."]
+    h5 = rubric.result("H5")
+    fired = {c.name: c for c in (h5.criteria if h5 else []) if c.effect == "supports"}
+    ranked = sorted((r for r in rubric.results if r.id != "H5"), key=lambda r: -r.score)
+    out: list[str] = []
+    if "Leading explanations are close" in fired and len(ranked) >= 2:
+        a, b = ranked[0], ranked[1]
+        pair = tuple(sorted((a.id, b.id)))
+        out.append(_PAIR_CHANGE.get(pair, f"Evidence that favours {a.label.lower()} or {b.label.lower()} over the "
+                                          f"other would allow a clearer assessment.")
+                   + f" The two are {abs(a.score - b.score):.0f} points apart; the rubric needs a 10-point lead.")
+    if "News sources unavailable" in fired:
+        out.append("A successful news search for the event window would let the company-news explanation be tested.")
+    if "Core measures missing" in fired:
+        missing = fired["Core measures missing"].evidence.replace("Missing: ", "")
+        out.append(f"The missing measures ({missing}) would need to be available, for example with a longer price "
+                   "history.")
+    if "Data-quality warnings" in fired:
+        out.append("Resolving the data-quality warnings for this security would make the measures more reliable.")
+    if "No explanation reaches the evidence threshold" in fired and ranked:
+        out.append(f"Stronger evidence for any one explanation: the best score, {ranked[0].score:.0f}, is below 45.")
+    return out[:3] or ["Successful news retrieval, longer price history or estimable beta would allow a clearer "
+                       "assessment."]
+
+
 def rules_risk(ctx: InvestigationContext) -> dict:
     ev = ctx.evidence
     risk = ev.get("get_risk_metrics") or {}
@@ -163,6 +208,6 @@ def rules_risk(ctx: InvestigationContext) -> dict:
         "executive_summary": " ".join(summary),
         "risk_implications": implications,
         "monitoring_suggestions": monitoring,
-        "what_would_change_conclusion": change.get(lead_id, change["H5"]),
+        "what_would_change_conclusion": change[lead_id] if lead_id in change and lead_id != "H5" else _h5_change(rubric),
         "next_steps": next_steps,
     }

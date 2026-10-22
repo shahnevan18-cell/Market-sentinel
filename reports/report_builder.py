@@ -9,6 +9,8 @@ from __future__ import annotations
 import html as html_lib
 
 from agents.guidance import build_guidance
+from agents.trace import (NO_MODEL_NOTE, RUBRIC_NOTE, analyst_reading, model_activity, model_activity_lines,
+                          model_activity_summary)
 
 from config.market import DISCLOSURE_TERMS_NOTE, fmt_inr, fmt_market_clock, fmt_market_time
 from config.settings import APP_NAME
@@ -91,6 +93,25 @@ def build_markdown(rec: dict) -> str:
     add("## 1. Executive summary")
     add("**What happened?** " + g["what_happened"])
     add("")
+    reading = analyst_reading(rec)
+    if reading is None:
+        add(f"_{NO_MODEL_NOTE}_")
+        add("")
+    else:
+        add(f"**Analyst reading by {reading['model']}** (written by the model from the tool results; every figure "
+            "was checked against the tool outputs)")
+        add("")
+        for e in reading["explanations"]:
+            add(f"- {e['label']} (rubric {e['score']:.0f} points): {e['note']}")
+        if reading["why_unresolved"]:
+            add(f"- Why the evidence does not settle it: {reading['why_unresolved']}")
+        for x in reading["checks"]:
+            add(f"- Check the model suggests: {x}")
+        for x in reading["would_change"]:
+            add(f"- Would change the model's view: {x}")
+        add("")
+        add(f"_{model_activity_summary(model_activity(rec))} {RUBRIC_NOTE}_")
+        add("")
     add(f"**What is the most plausible explanation?** {expl['headline']}.")
     add("")
     if unres:
@@ -365,6 +386,12 @@ def build_markdown(rec: dict) -> str:
         for e in eng["llm_errors"]:
             add(f"> {e}")
     add("")
+    act_model = model_activity(rec)
+    if act_model["any_model"] or act_model["investigator"]["turns"] or act_model["strategist"]["turns"]:
+        add("**What the model did**")
+        add("")
+        add(_bullets(model_activity_lines(act_model)))
+        add("")
     add("| # | Time (IST) | Actor | Step | Status | Result |\n|---|---|---|---|---|---|")
     for a in rec.get("audit", []):
         add(f"| {a.get('seq')} | {fmt_market_clock(a.get('timestamp')) or 'n/a'} | "

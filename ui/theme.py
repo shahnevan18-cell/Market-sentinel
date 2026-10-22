@@ -137,6 +137,18 @@ a:focus-visible, button:focus-visible {{ outline: 2px solid var(--cyan); outline
 .ms-action ol {{ margin:.2rem 0 .5rem 1.2rem; padding:0; font-size:.92rem; color:var(--text); }}
 .ms-action .k {{ font-size:.8rem; color:var(--muted); margin-top:.35rem; }}
 .ms-action .v {{ font-size:.9rem; color:var(--text); }}
+.ms-reading {{ border:1px solid rgba(43,179,163,.55); border-left:4px solid rgba(43,179,163,.9); border-radius:6px;
+               background:rgba(43,179,163,.06); padding:.75rem 1rem; margin:.5rem 0 .4rem 0; }}
+.ms-reading.muted {{ border-color:rgba(150,160,175,.35); border-left-color:rgba(150,160,175,.6);
+                     background:rgba(150,160,175,.05); padding:.5rem .9rem; }}
+.ms-reading .h {{ font-size:1rem; font-weight:600; color:var(--text); }}
+.ms-reading .sub {{ font-size:.82rem; color:var(--muted); margin:.15rem 0 .35rem 0; }}
+.ms-reading .k {{ font-size:.8rem; color:var(--muted); margin-top:.45rem; }}
+.ms-reading .v {{ font-size:.92rem; color:var(--text); }}
+.ms-reading ul, .ms-reading ol {{ margin:.2rem 0 .3rem 1.2rem; padding:0; font-size:.92rem; color:var(--text); }}
+.ms-reading li {{ margin:.15rem 0; }}
+.ms-reading .foot {{ font-size:.8rem; color:var(--muted); margin-top:.55rem; border-top:1px solid rgba(150,160,175,.25);
+                     padding-top:.4rem; }}
 @media (prefers-reduced-motion: reduce) {{ * {{ transition:none !important; animation:none !important; }} }}
 </style>
 """

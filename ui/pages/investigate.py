@@ -9,7 +9,8 @@ import streamlit as st
 
 from agents.orchestrator import STAGES, InvestigationError, list_records, load_record, run_investigation, stage_progress
 from agents.sentinel_monitor import recent_priority_alert
-from agents.trace import decision_trace, engine_facts
+from agents.trace import (NO_MODEL_NOTE, RUBRIC_NOTE, analyst_reading, decision_trace, engine_facts,
+                          model_activity, model_activity_lines, model_activity_summary)
 from config.market import DISCLOSURE_TERMS_NOTE
 from reports.report_builder import build_html, build_markdown
 from agents.guidance import build_guidance
@@ -126,10 +127,52 @@ def _catalyst_html(cat: dict) -> str:
             f'<div class="src">{c.esc(cat.get("access_note", ""))}</div></div>')
 
 
+def _reading_html(r: dict) -> str:
+    """The model's own reading of the evidence, shown as written (its figures passed the grounding check)."""
+    parts = [f'<div class="h">Analyst reading by {c.esc(r["model"])}</div>'
+             '<div class="sub">Written by the model from the tool results. Every figure in it was checked against '
+             'the tool outputs before it was accepted.</div>']
+    if r["explanations"]:
+        items = "".join(f'<li><b>{c.esc(e["label"])}</b> (rubric {e["score"]:.0f} points): {c.esc(e["note"])}</li>'
+                        for e in r["explanations"])
+        parts.append(f'<div class="k">On the leading explanations</div><ul>{items}</ul>')
+    if r["why_unresolved"]:
+        parts.append(f'<div class="k">Why the evidence does not settle it</div><div class="v">{c.esc(r["why_unresolved"])}</div>')
+    if r["checks"]:
+        parts.append('<div class="k">Checks the model suggests</div><ol>'
+                     + "".join(f"<li>{c.esc(x)}</li>" for x in r["checks"]) + "</ol>")
+    if r["would_change"]:
+        parts.append('<div class="k">What would change the model\'s view</div><ul>'
+                     + "".join(f"<li>{c.esc(x)}</li>" for x in r["would_change"]) + "</ul>")
+    if len(parts) == 1 and r.get("summary"):
+        parts.append(f'<div class="v">{c.esc(r["summary"])}</div>')
+    parts.append(f'<div class="foot">{c.esc(RUBRIC_NOTE)}</div>')
+    return '<div class="ms-reading" role="region" aria-label="Analyst reading">' + "".join(parts) + "</div>"
+
+
+def _render_model_reading(rec: dict) -> None:
+    r = analyst_reading(rec)
+    if r is None:
+        st.html(f'<div class="ms-reading muted"><div class="sub">{c.esc(NO_MODEL_NOTE)}</div></div>')
+        return
+    st.html(_reading_html(r))
+    act = model_activity(rec)
+    st.caption(model_activity_summary(act))
+    with st.expander("What the model did in this run"):
+        for line in model_activity_lines(act):
+            st.markdown(f"- {line}")
+    texts = [t for t in (r.get("summary"), r.get("strategist_summary")) if t]
+    if texts:
+        with st.expander("The model's full written summary"):
+            for t in texts:
+                st.write(t)
+
+
 def _render_summary(rec: dict, g: dict) -> None:
     expl, cat, act, unres = g["explanation"], g["catalyst"], g["action"], g.get("unresolved")
     st.html('<div class="ms-q">A. What happened?</div>'
             f'<div class="ms-answer">{c.esc(g["what_happened"])}</div>')
+    _render_model_reading(rec)
 
     st.html('<div class="ms-q">B. What is the most plausible explanation?</div>'
             f'<div class="ms-answer"><span class="ms-status {c.esc(expl["status"])}">{c.esc(expl["status"].capitalize())}</span>'
